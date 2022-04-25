@@ -1,8 +1,8 @@
 {
   "name": "cardmaster",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "engines": {
-    "node": "16.x"
+    "node": ">=16.9.0"
   },
   "description": "",
   "main": "index.js",
@@ -10,15 +10,21 @@
     "tsc": "tsc",
     "clean": "rm -r build/*",
     "test": "rm -r build/* ; tsc && node ./build/app.js",
+    "nuke": "rm -r build/* ; tsc && node ./build/nukecommands.js",
+    "deploy": "rm -r build/* ; tsc && node ./build/deploycommands.js",
     "build": "rm -r build/* ; tsc",
     "start": "node ./build/app.js"
   },
   "author": "Astavie",
   "license": "ISC",
   "dependencies": {
-    "@types/node": "^13.13.5",
-    "discord.js": "github:discordjs/discord.js",
+    "@discordjs/builders": "^0.13.0",
+    "@discordjs/rest": "^0.4.1",
+    "@types/node": "^17.0.25",
+    "discord-api-types": "^0.31.2",
+    "discord.js": "^13.6.0",
     "dotenv": "^8.2.0",
-    "typescript": "^4.2.3"
+    "typescript": "^4.6.3",
+    "word-list-json": "^0.2.0"
   }
 }

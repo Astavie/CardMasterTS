@@ -4,7 +4,8 @@
         "module": "commonjs",
         "outDir": "build",
         "sourceMap": false,
-        "esModuleInterop": true
+        "esModuleInterop": true,
+        "strictNullChecks": true
     },
     "include": [
         "src/**/*.ts"

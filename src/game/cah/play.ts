@@ -1,250 +1,192 @@
-import { EmbedFieldData, User } from "discord.js";
-import { GameInstance, MessageController, shuffle } from "../game";
-import { addPlayer, CAH, CAHContext, CAHStates, getBlanks, getPointsList, isCzar, randoId, realizeCard, removePlayer } from "./cah";
+import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowComponentResolvable, MessageActionRowOptions } from "discord.js";
+import { MessageController } from "../../util/message";
+import { GameInstance } from "../game";
+import { CAH, CAHState, getBlanks, randoId, realizeCard, CAHAction, addPlayer, removePlayer, fillCard } from "./cah";
 
-export async function play(game: GameInstance<CAHContext, CAHStates>): Promise<CAHStates | void> {
+export function play(game: GameInstance, state: CAHState, msg: MessageController): Promise<CAHAction> {
+    return new Promise<CAHAction>(resolve => {
+        // Get black card
+        const card = state.blackDeck.pop();
 
-    // Get black card
-    if (game.context.blackDeck.length === 0) {
-        new MessageController(game, () => {
-            return {
+        if (!card) {
+            game.sendAll(new MessageController(() => ({
                 embeds: [{
-                    color: "#000000",
+                    color: CAH.color,
                     description: "**The game has ended because there are no more black cards left.**"
                 }]
-            }
-        }).sendAll();
-        return "end";
-    }
+            })));
+            resolve(CAHAction.End);
+            return;
+        }
 
-    game.context.prompt = realizeCard(game.context.blackDeck.pop(), game.players);
-    const blanks = getBlanks(game.context.prompt);
+        state.prompt = realizeCard(card, game.players);
+        const blanks = getBlanks(state.prompt);
 
-    // Give white cards
-    if (!game.context.quiplash) {
+        // Give white cards
         for (const player of game.players) {
-            const hand = game.context.players[player.id].hand;
-            while (hand.length < game.context.handCards) {
-                if (game.context.whiteDeck.length <= 0) {
-                    new MessageController(game, () => {
-                        return {
-                            embeds: [{
-                                color: "#000000",
-                                description: "**The game has ended because there are not enough white cards left.**"
-                            }]
-                        }
-                    }).sendAll();
-                    return "end";
+            const hand = state.players[player.id].hand;
+            while (hand.length < state.handCards) {
+                const card = state.whiteDeck.pop();
+                if (!card) {
+                    game.sendAll(new MessageController(() => ({
+                        embeds: [{
+                            color: CAH.color,
+                            description: "**The game has ended because there are not enough white cards left.**"
+                        }]
+                    })));
+                    resolve(CAHAction.End);
+                    return;
                 }
-                hand.push(realizeCard(game.context.whiteDeck.pop(), game.players));
+                hand.push(realizeCard(card, game.players));
             }
         }
-    }
 
-    // Set czar
-    game.context.czar = game.context.czar >= game.players.length - 1 ? 0 : game.context.czar + 1;
+        // Set czar
+        state.czar = state.czar >= game.players.length - 1 ? 0 : state.czar + 1;
 
-    // Generate pairs for 1v1 mode
-    if (game.context.versus) {
-        game.context.picked = [];
+        // Set cards being played
+        for (const player of Object.values(state.players)) player.playing = Array(blanks).fill(undefined);
 
-        if (game.context.pairs.length) game.context.pairs.shift();
-        game.context.picked.push([]);
-        game.context.picked.push([]);
-
-        if (!game.context.pairs.length) {
-            let players = Object.keys(game.context.players).map((_p, i) => i);
-            if (game.context.rando) players = players.map(i => i - 1);
-
-            shuffle(players);
-
-            players.push(players[0]);
-            for (let i = 0; i < players.length - 1; i++) {
-                game.context.pairs.push([players[i], players[i + 1]]);
-            }
-
-            if (game.players.length === 2) {
-                game.context.pairs = game.context.pairs.filter(p => p[0] === -1 || p[1] === -1);
-            }
-
-            shuffle(game.context.pairs);
-            game.context.round += 1;
-        }
-    }
-
-    // Set cards being played
-    for (const player of Object.values(game.context.players)) player.playing = [];
-
-    if (game.context.rando) {
-        game.context.players[randoId].hand = [];
-        if (!game.context.versus || game.context.pairs[0].includes(-1)) {
+        if (state.rando) {
+            state.players[randoId].hand = [];
             for (let i = 0; i < blanks; i++) {
-                if (game.context.whiteDeck.length <= 0) {
-                    new MessageController(game, () => {
-                        return {
-                            embeds: [{
-                                color: "#000000",
-                                description: "**The game has ended because there are not enough white cards left.**"
-                            }]
-                        }
-                    }).sendAll();
-                    return "end";
+                const card = state.whiteDeck.pop();
+                if (!card) {
+                    game.sendAll(new MessageController(() => ({
+                        embeds: [{
+                            color: CAH.color,
+                            description: "**The game has ended because there are not enough white cards left.**"
+                        }]
+                    })));
+                    return false;
                 }
-                game.context.players[randoId].hand.push(realizeCard(game.context.whiteDeck.pop(), game.players));
+                state.players[randoId].hand.push(realizeCard(card, game.players));
             }
-            game.context.players[randoId].playing = game.context.players[randoId].hand.map((_c, i) => i);
+            state.players[randoId].playing = state.players[randoId].hand.map((_, i) => i);
         }
-    }
 
-    // Display round
-    let ended = false;
+        // Display round
+        msg.message = channel => {
+            const fields: EmbedFieldData[] = [];
 
-    let prompt = `> ${game.context.prompt.replaceAll("_", "\\_")}`
-    if (!game.context.versus) {
-        prompt = `Card Czar: <@${game.players[game.context.czar].id}>\n\n` + prompt;
-    }
+            const player = channel.type == "DM" ? channel.recipient : undefined;
 
-    const play = new MessageController(game, player => {
-        const played = Object.values(game.context.players).filter(p => p.playing.length === blanks).length;
-        const message = prompt + `\n\n*${played} player${played === 1 ? " has" : "s have"} selected ${blanks === 1 ? "a card" : "their cards"}.*`;
+            let components: (Required<BaseMessageComponentOptions> & MessageActionRowOptions)[] = [];
 
-        const fields: EmbedFieldData[] = [{
-                name: "Prompt",
-                value: message
-        }];
+            let prompt = state.prompt as string;
 
-        if (player && !isCzar(game, player)) {
-            if (game.context.quiplash) {
-                fields.push({
-                    name: "Action",
-                    value: `__Please fill in the ${blanks === 1 ? "blank below" : blanks + " blanks below, seperated by newlines"}.__`
-                });
-            } else {
+            if (player && game.players[state.czar] !== player) {
+                prompt = fillCard(prompt, state.players[player.id].hand, state.players[player.id].playing);
+
                 fields.push({
                     name: "Hand",
-                    value:
-                        `__Please select ${blanks === 1 ? "a card" : blanks + " cards"} by typing ${blanks === 1 ? "its number" : "their numbers seperated by spaces"} below.__\n\n` +
-                        game.context.players[player.id].hand.map((c, i) => `\`${i + 1}.\` ${c}`).join("\n")
+                    value: state.players[player.id].hand.map((c, i) => `\`${(i + 1).toString().padStart(2)}.\` ${c}`).join("\n")
+                });
+
+                const playing = state.players[player.id].playing;
+                const playingStyle = !playing.includes(undefined) ? "SUCCESS" : "PRIMARY";
+                const disableUnplayed = !playing.includes(undefined) && blanks > 1;
+
+                let hand = 0;
+                while (hand < state.handCards) {
+                    const row: MessageActionRowComponentResolvable[] = [];
+                    for (let i = 0; i < 5; i++) {
+                        row.push({
+                            type: "BUTTON",
+                            style: playing.includes(hand) ? playingStyle : "SECONDARY",
+                            label: (hand + 1).toString(),
+                            customId: `hand_${hand}`,
+                            disabled: !playing.includes(hand) && disableUnplayed,
+                        });
+
+                        hand++;
+                        if (hand >= state.handCards) break;
+                    }
+                    components.push({
+                        type: "ACTION_ROW",
+                        components: row
+                    });
+                }
+            } else {
+                prompt = prompt.replaceAll("_", "\\_");
+            }
+
+            prompt = `> ${prompt}`
+            prompt = `Card Czar: ${game.players[state.czar]}\n\n${prompt}`;
+
+            const played =
+                Object.values(state.players).filter(p => !p.playing.includes(undefined)).length +
+                "/" +
+                (Object.values(state.players).length - 1);
+            
+            const message = prompt + `\n\n*${played} players have selected ${blanks === 1 ? "a card" : "their cards"}.*`;
+
+            fields.unshift({
+                name: "Prompt",
+                value: message
+            });
+
+            return {
+                embeds: [{
+                    color: CAH.color,
+                    fields: fields
+                }],
+                components: components
+            };
+        };
+
+        // Select card logic
+        msg.consumers = [m => {
+            const player = m.channel.type == "DM" ? m.channel.recipient : undefined;
+        
+            if (!player || !game.players.includes(player) || game.players[state.czar] === player) return;
+
+            for (let index = 0; index < state.handCards; index++) {
+                game.onButton(m, `hand_${index}`, i => {
+                    const playing = state.players[player.id].playing;
+                    const pIndex = playing.indexOf(index);
+                    const uIndex = playing.indexOf(undefined);
+                    if (pIndex === -1) {
+                        if (uIndex === -1) return;
+                        playing[uIndex] = index;
+
+                        if (playing.indexOf(undefined) === -1) {
+                            if (game.players.every((p, i) => state.czar === i || !state.players[p.id].playing.includes(undefined))) {
+                                // All players are ready
+                                msg.end(i);
+                                for (const m of [...msg.messages]) {
+                                    if (m.channel.type == "DM") {
+                                        msg.endMessage(m);
+                                    }
+                                }
+                                game.resetControls();
+                                resolve(CAHAction.Continue);
+                            } else {
+                                msg.updateAll(i);
+                            }
+                        } else {
+                            msg.update(i);
+                        }
+                    } else {
+                        playing[pIndex] = undefined;
+
+                        if (uIndex === -1) {
+                            msg.updateAll(i);
+                        } else {
+                            msg.update(i);
+                        }
+                    }
                 });
             }
-        }
+        }];
 
-        fields.push({
-            name: "Points",
-            value: getPointsList(game.players, game.context.rando, game.context.players, game.context.maxPoints)
-        })
+        // Join and leave logic
+        game.join = (i, player) => addPlayer(i, game, player, state, resolve, msg);
+        game.leave = (i, player, index) => removePlayer(i, game, player, index, state, resolve, msg);
 
-        return {
-            embeds: [{
-                color: "#000000",
-                title: CAH.name + (game.context.versus ? " — Round " + game.context.round : ""),
-                fields: fields
-            }],
-            components: player === null && !game.context.versus ? [[
-                {
-                    type: "BUTTON",
-                    style: "SUCCESS",
-                    label: "Join",
-                    customId: "join",
-                    disabled: ended
-                },
-                {
-                    type: "BUTTON",
-                    style: "DANGER",
-                    label: "Leave",
-                    customId: "leave",
-                    disabled: ended
-                },
-            ]] : undefined
-        }
+        game.addLeaveButton(msg);
+        game.addSetupLogic();
+        
+        game.sendAll(msg);
     });
-
-    await play.sendAll();
-
-    return await new Promise<CAHStates>(resolve => {
-        if (!game.context.versus) {
-            game.onButtonCallback(play.channelMessage, "join", async i => {
-                if (addPlayer(game, i, play)) {
-                    addMessageHandler(game, i.user, blanks, play, resolve);
-                }
-            });
-            game.onButtonCallback(play.channelMessage, "leave", async i => {
-                const state = await removePlayer(game, i, play, () => ended = true);
-                if (state) {
-                    resolve(state);
-                }
-            });
-        }
-
-        for (const player of game.players) {
-            addMessageHandler(game, player, blanks, play, resolve);
-        }
-    });
-}
-
-function addMessageHandler(game: GameInstance<CAHContext, CAHStates>, player: User, blanks: number, message: MessageController, resolve: (s: CAHStates) => void) {
-    if (!isCzar(game, player)) {
-        game.onMessageCallback(player.dmChannel, player, async i => {
-            // Get cards
-            let selected = [];
-
-            if (game.context.quiplash) {
-                selected = i.content.split("\n");
-            } else {
-                for (const s of i.content.split(" ")) {
-                    if (s.trim() === "") continue;
-
-                    const card = parseInt(s);
-                    if (isNaN(card) || card < 1 || card > game.context.handCards) {
-                        i.reply({ content: "Card number must be between 1 and " + game.context.handCards + "." })
-                        return;
-                    }
-
-                    selected.push(card - 1);
-                }
-            }
-
-            // Check if right amount
-            if (selected.length !== blanks) {
-                i.reply({ content: game.context.quiplash ? `You must fill in ${blanks} ${blanks === 1 ? 'blank' : 'blanks'}.` : `You must select ${blanks} ${blanks === 1 ? 'card' : 'cards'}.` })
-                return;
-            }
-
-            // Assign
-            if (game.context.quiplash) {
-                game.context.players[player.id].hand = selected;
-                game.context.players[player.id].playing = selected.map((_s, i) => i);
-            } else {
-                game.context.players[player.id].playing = selected;
-            }
-
-            // Check if everyone is done now
-            const finished = !game.players.some(p => !isCzar(game, p) && game.context.players[p.id].playing.length !== blanks);
-
-            // Display
-            await i.reply({ embeds: [{
-                color: "#000000",
-                fields: [{
-                    name: `Selected ${blanks === 1 ? 'card' : 'cards'}`,
-                    value: game.context.players[player.id].playing.map(s => "`" + (s + 1) + ".` " + game.context.players[player.id].hand[s]).join("\n")
-                }]
-            }]});
-
-            // Continue!
-            if (finished) {
-                message.editAll();
-
-                // Shuffle players
-                game.context.shuffle = game.players.filter(p => !isCzar(game, p) && game.context.players[p.id].playing.length === blanks).map(p => p.id);
-                if (game.context.rando && (!game.context.versus || game.context.pairs[0].includes(-1))) game.context.shuffle.push(randoId);
-                shuffle(game.context.shuffle);
-
-                // continue
-                game.context.playMessage = message;
-                resolve("read");
-            } else {
-                message.editAll();
-            }
-        });
-    }
 }

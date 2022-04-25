@@ -1,5 +1,0 @@
- - Clearer when you're a card czar in 1v1 mode
- - Jinx detector in 1v1 mode
- - Create DM channel if it doesn't exist
- - Readd player joining and leaving for versus mode
- - See who needs to play in non-versus mode
