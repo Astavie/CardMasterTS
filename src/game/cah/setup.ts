@@ -1,7 +1,7 @@
 import { BaseCommandInteraction } from "discord.js";
 import { MessageController } from "../../util/message";
 import { GameInstance, shuffle } from "../game";
-import { CAH, CAHState, getPlayerList, packs, randoId } from "./cah";
+import { CAH, CAHState, getPlayerList, packs, randoId, requiredCards } from "./cah";
 
 // Packs inside .gitignore
 function conditionalRequire(name: string): any {
@@ -29,7 +29,7 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
                 title: CAH.name,
                 fields: [{
                     name: "Players",
-                    value: getPlayerList(game.players, state.rando)
+                    value: getPlayerList(game.players, state.flags[0])
                 }]
             }]
         }));
@@ -38,7 +38,8 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
             state.players[player.id] = {
                 hand: [],
                 playing: [],
-                points: 0
+                points: 0,
+                hidden: false,
             };
             msg.updateAll(i);
         };
@@ -50,7 +51,7 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
         game.maxPlayers = () => 20;
         
         game.addFlagsInput(msg, "Packs", internalPacks.map(p => p.name), packsPicked);
-        game.addFlagsInput(msg, "Rules", ["Rando Cardrissian"], [false], (_, value) => state.rando = value);
+        game.addFlagsInput(msg, "Rules", ["Rando Cardrissian", "Quiplash Mode"], state.flags);
         game.addNumberInput(msg, "Points", 1, 8, Number.MAX_SAFE_INTEGER, value => state.maxPoints = value);
         game.addNumberInput(msg, "Cards", 5, 10, 20, value => state.handCards = value);
         game.setSetupMessage(msg, (i, m) => {
@@ -70,7 +71,7 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
                 return;
             }
     
-            if (state.whiteDeck.length < game.players.length * state.handCards + (state.rando ? 1 : 0)) {
+            if (state.whiteDeck.length < requiredCards(game, state)) {
                 i.reply({ ephemeral: true, content: "There aren't enough white cards in the selected packs to give everyone a full hand." });
                 return;
             }
@@ -78,11 +79,12 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
             shuffle(state.whiteDeck);
             shuffle(state.blackDeck);
 
-            if (state.rando) {
+            if (state.flags[0]) {
                 state.players[randoId] = {
                     hand: [],
                     playing: [],
-                    points: 0
+                    points: 0,
+                    hidden: false,
                 }
             }
 

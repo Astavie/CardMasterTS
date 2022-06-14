@@ -1,4 +1,10 @@
-import { BaseCommandInteraction, Interaction, Message, MessageComponentInteraction, MessageOptions, TextBasedChannel } from "discord.js";
+import { BaseCommandInteraction, BaseMessageComponentOptions, Message, MessageActionRowOptions, MessageComponentInteraction, MessageEmbedOptions, ModalSubmitInteraction, TextBasedChannel } from "discord.js";
+
+export type MessageOptions = {
+    content?: string;
+    embeds?: MessageEmbedOptions[];
+    components?: (Required<BaseMessageComponentOptions> & MessageActionRowOptions)[];
+}
 
 export type MessageGenerator = (channel: TextBasedChannel, prev?: Message) => MessageOptions;
 
@@ -27,7 +33,7 @@ export class MessageController {
         this.message = message ?? (() => ({}));
     }
 
-    async reply(i: BaseCommandInteraction | MessageComponentInteraction) {
+    async reply(i: BaseCommandInteraction | MessageComponentInteraction | ModalSubmitInteraction) {
         if (!i.channel) throw new Error("Unknown channel");
 
         const msg = await i.reply({ ... this.message(i.channel), fetchReply: true }) as Message;
@@ -43,7 +49,7 @@ export class MessageController {
         return msg;
     }
 
-    update(i: MessageComponentInteraction) {
+    update(i: MessageComponentInteraction | ModalSubmitInteraction) {
         if (!i.channel) throw new Error("Unknown channel");
         return i.update(this.message(i.channel, i.message as Message));
     }
@@ -52,7 +58,7 @@ export class MessageController {
         return m.edit(this.message(m.channel, m));
     }
 
-    updateAll(i?: MessageComponentInteraction) {
+    updateAll(i?: MessageComponentInteraction | ModalSubmitInteraction) {
         const promises: Promise<any>[] = [];
 
         for (const msg of this.messages) {
@@ -68,7 +74,7 @@ export class MessageController {
         return Promise.all(promises);
     }
 
-    end(i: MessageComponentInteraction) {
+    end(i: MessageComponentInteraction | ModalSubmitInteraction) {
         const index = this.messages.indexOf(i.message as Message);
         if (index < 0) throw new Error("Message not found");
 
@@ -84,7 +90,7 @@ export class MessageController {
         return msg.edit(disableButtons(this.message(msg.channel, msg)));
     }
 
-    endAll(i?: MessageComponentInteraction) {
+    endAll(i?: MessageComponentInteraction | ModalSubmitInteraction) {
         const promises: Promise<any>[] = [];
 
         for (const msg of this.messages) {
@@ -102,12 +108,12 @@ export class MessageController {
         return Promise.all(promises);
     }
 
-    disableButtons(i: MessageComponentInteraction, ...exceptions: string[]) {
+    disableButtons(i: MessageComponentInteraction | ModalSubmitInteraction, ...exceptions: string[]) {
         if (!i.channel) throw new Error("Unknown channel");
         return i.update(disableButtons(this.message(i.channel, i.message as Message), ...exceptions));
     }
 
-    isMyInteraction(i: MessageComponentInteraction) {
+    isMyInteraction(i: MessageComponentInteraction | ModalSubmitInteraction) {
         return this.messages.includes(i.message as Message);
     }
 

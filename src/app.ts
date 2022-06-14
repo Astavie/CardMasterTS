@@ -26,6 +26,11 @@ client.on('interactionCreate', async interaction => {
 			game.resolveSelect(interaction);
 		}
 		return;
+	} else if (interaction.isModalSubmit()) {
+		for (const game of gameInstances) {
+			game.resolveModal(interaction);
+		}
+		return;
 	}
 	
 	if (!interaction.isCommand()) return;

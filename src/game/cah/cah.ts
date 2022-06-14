@@ -31,6 +31,10 @@ export function getPlayerList(players: User[], rando: boolean) {
     return ids.length > 0 ? ids.join("\n") : "*None*";
 }
 
+export function requiredCards(game: GameInstance, state : CAHState) {
+    return (state.flags[1] ? 0 : game.players.length * state.handCards) + (state.flags[0] ? 1 : 0);
+}
+
 export function getPointsList(players: User[], rando: boolean, points: {[key: string]: { points: number }}, maxPoints: number) {
     const ids = players.map(p => "`" + points[p.id].points.toString().padStart(2) + "` " + p.toString());
     if (rando) {
@@ -64,7 +68,8 @@ export function addPlayer(i: ButtonInteraction, game: GameInstance, player: User
     state.players[player.id] = {
         hand: [],
         playing: [],
-        points: 0
+        points: 0,
+        hidden: false,
     }
 
     const hand = state.players[player.id].hand;
@@ -154,18 +159,20 @@ export function removePlayer(i: ButtonInteraction, game: GameInstance, player: U
 export const randoId = "rando";
 
 function createInitialState() {
-    return {
+    const state = {
         players: {} as {[key: string]: {
             hand: Card[],
             playing: (number | undefined)[],
-            points: number
+            points: number,
+            hidden: boolean,
         }},
 
         shuffle: [] as string[],
 
-        rando: false,
-        versus: false,
-        quiplash: false,
+        flags: [
+            false, // rando
+            false, // quiplash
+        ],
 
         maxPoints: 8,
         handCards: 10,
@@ -176,6 +183,7 @@ function createInitialState() {
         prompt: undefined as Card | undefined,
         czar: -1,
     };
+    return state;
 }
 
 export type CAHState = ReturnType<typeof createInitialState>;

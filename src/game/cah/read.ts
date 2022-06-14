@@ -7,7 +7,7 @@ export async function read(game: GameInstance, state: CAHState, msg: MessageCont
     return new Promise<CAHAction>(resolve => {
         // Shuffle players
         state.shuffle = game.players.filter((p, index) => state.czar !== index && !state.players[p.id].playing.includes(undefined)).map(p => p.id);
-        if (state.rando) state.shuffle.push(randoId);
+        if (state.flags[0]) state.shuffle.push(randoId);
         shuffle(state.shuffle);
 
         // Display
@@ -100,7 +100,7 @@ export async function read(game: GameInstance, state: CAHState, msg: MessageCont
                                 value: `${state.shuffle[index] === randoId ? "`Rando Cardrissian`" : `<@${state.shuffle[index]}>`}\n${answer}`
                             },{
                                 name: 'Points',
-                                value: getPointsList(game.players, state.rando, state.players, state.maxPoints)
+                                value: getPointsList(game.players, state.flags[0], state.players, state.maxPoints)
                             }]
                         }]
                     }))).then(() => {

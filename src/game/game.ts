@@ -1,4 +1,4 @@
-import { ButtonInteraction, ColorResolvable, BaseCommandInteraction, Message, SelectMenuInteraction, User, MessageActionRowComponentOptions, TextBasedChannel, ThreadChannel, Interaction } from "discord.js";
+import { ButtonInteraction, ColorResolvable, BaseCommandInteraction, Message, SelectMenuInteraction, User, MessageActionRowComponentOptions, TextBasedChannel, ThreadChannel, Interaction, Snowflake, ModalSubmitInteraction, MessageActionRowComponentResolvable } from "discord.js";
 import { MessageController } from "../util/message";
 import { CAH } from "./cah/cah";
 
@@ -22,8 +22,9 @@ export type Game = {
 
 export class GameInstance {
 
-    buttons: { [key:string]: { [key:string]: (i: ButtonInteraction) => void }} = {};
-    select: { [key:string]: { [key:string]: (i: SelectMenuInteraction) => void }} = {};
+    buttons: { [key:Snowflake]: { [key:string]: (i: ButtonInteraction) => void }} = {};
+    select: { [key:Snowflake]: { [key:string]: (i: SelectMenuInteraction) => void }} = {};
+    modals: { [key:Snowflake]: { [key:string]: (i: ModalSubmitInteraction) => void }} = {};
     // message: { [key:string]: { [key:string]: (m: Message) => void }} = {};
 
     players: User[] = [];
@@ -61,6 +62,16 @@ export class GameInstance {
 
     resolveButton(inter: ButtonInteraction) {
         this.buttons[inter.message.id]?.[inter.customId]?.(inter);
+    }
+
+    onModal(message: Message, modal: string, callback: (i: ModalSubmitInteraction) => any | undefined) {
+        this.modals[message.id] = this.modals[message.id] ?? {};
+        this.modals[message.id][modal] = callback;
+    }
+
+    resolveModal(inter: ModalSubmitInteraction) {
+        if (!inter.message) return;
+        this.modals[inter.message.id]?.[inter.customId]?.(inter);
     }
 
     onSelect(message: Message, button: string, callback: (i: SelectMenuInteraction) => any | undefined) {
@@ -258,7 +269,7 @@ export class GameInstance {
         });
     }
 
-    addLeaveButton(msg: MessageController) {
+    addLeaveButton(msg: MessageController, addRow = true) {
         // Add button
         const old = msg.message;
         msg.message = (channel, prev) => {
@@ -266,15 +277,24 @@ export class GameInstance {
             if (channel.type !== "DM") return m;
 
             m.components ??= [];
-            m.components.push({
-                type: "ACTION_ROW",
-                components: [{
+            if (addRow || m.components.length == 0) {
+                m.components.push({
+                    type: "ACTION_ROW",
+                    components: [{
+                        type: "BUTTON",
+                        customId: "_leave",
+                        label: "Leave",
+                        style: "DANGER"
+                    }]
+                });
+            } else {
+                (m.components[0].components as MessageActionRowComponentResolvable[]).push({
                     type: "BUTTON",
                     customId: "_leave",
                     label: "Leave",
                     style: "DANGER"
-                }]
-            });
+                });
+            }
             return m;
         };
         
@@ -341,55 +361,6 @@ export class GameInstance {
                 }
 
                 start(i, m);
-            });
-        });
-    }
-
-    addReadyButton(msg: MessageController, ready: User[], allowed: User[], callback: () => any, unauthorizedLobby?: string) {
-        // Apply effect immediately if no players need to be ready
-        if (allowed.length == 0) {
-            callback();
-            return;
-        }
-
-        // Add button
-        const old = msg.message;
-        msg.message = (channel, prev) => {
-            const m = old(channel, prev);
-            if (channel.type !== "DM" && !unauthorizedLobby) return m;
-            if (channel.type === "DM" && !allowed.includes(channel.recipient)) return m;
-
-            m.components ??= [];
-            m.components.push({
-                type: "ACTION_ROW",
-                components: [{
-                    type: "BUTTON",
-                    customId: "_ready",
-                    label: "Ready",
-                    style: channel.type === "DM" && ready.indexOf(channel.recipient) >= 0 ? "SUCCESS" : "SECONDARY"
-                }]
-            });
-            return m;
-        };
-
-        // Add button logic
-        msg.consumers.push(m => {
-            if (m.channel.type !== "DM" && !unauthorizedLobby) return;
-            if (m.channel.type === "DM" && !allowed.includes(m.channel.recipient)) return;
-
-            this.onButton(m, "_ready", async i => {
-                if (unauthorizedLobby && !allowed.includes(i.user)) {
-                    i.reply({ content: unauthorizedLobby, ephemeral: true });
-                    return;
-                }
-
-                ready.push(i.user);
-                const all = ready.length >= allowed.length;
-                if (all) {
-                    callback();
-                } else {
-                    msg.updateAll(i);
-                }
             });
         });
     }
