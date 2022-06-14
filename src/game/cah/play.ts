@@ -237,7 +237,13 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
                     if (split[i].length > 45) {
                         let index = split[i].indexOf('_');
                         if (index + 42 > split[i].length) index = split[i].length - 42;
-                        split[i] = split[i].substring(index, index + 42) + "...";
+                        split[i] = split[i].substring(index, index + 42);
+
+                        if (index > 0) {
+                            split[i] = "..." + split[i];
+                        } else {
+                            split[i] = split[i] + "...";
+                        }
                     }
                 }
                 
