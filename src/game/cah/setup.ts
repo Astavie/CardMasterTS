@@ -1,4 +1,4 @@
-import { BaseCommandInteraction, MessageComponentInteraction } from "discord.js";
+import { BaseCommandInteraction } from "discord.js";
 import { MessageController } from "../../util/message";
 import { GameInstance, shuffle } from "../game";
 import { CAH, CAHState, getPlayerList, packs, randoId } from "./cah";
@@ -40,65 +40,56 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
                 playing: [],
                 points: 0
             };
-            if (msg.isMyInteraction(i)) {
-                msg.updateAll(i as MessageComponentInteraction);
-            } else {
-                // TODO: Slash join
-            }
+            msg.updateAll(i);
         };
         game.leave = (i, player) => {
             delete state.players[player.id];
-            if (msg.isMyInteraction(i)) {
-                msg.updateAll(i as MessageComponentInteraction);
-            } else {
-                // TODO: Slash kick
-            }
+            msg.updateAll(i);
         };
         game.minPlayers = () => 2;
         game.maxPlayers = () => 20;
         
         game.addFlagsInput(msg, "Packs", internalPacks.map(p => p.name), packsPicked);
         game.addFlagsInput(msg, "Rules", ["Rando Cardrissian"], [false], (_, value) => state.rando = value);
-        game.addNumberInput(msg, "Points", 1, 8, Number.MAX_SAFE_INTEGER + 1, value => state.maxPoints = value);
+        game.addNumberInput(msg, "Points", 1, 8, Number.MAX_SAFE_INTEGER, value => state.maxPoints = value);
         game.addNumberInput(msg, "Cards", 5, 10, 20, value => state.handCards = value);
-        game.setSetupMessage(msg,
-            i => {
-                // START
-                state.whiteDeck = [];
-                state.blackDeck = [];
-        
-                for (let i = 0; i < internalPacks.length; i++) {
-                    if (packsPicked[i]) {
-                        for (const card of internalPacks[i].cards.white) state.whiteDeck.push(card);
-                        for (const card of internalPacks[i].cards.black) state.blackDeck.push(card);
-                    }
+        game.setSetupMessage(msg, (i, m) => {
+            // START
+            state.whiteDeck = [];
+            state.blackDeck = [];
+    
+            for (let i = 0; i < internalPacks.length; i++) {
+                if (packsPicked[i]) {
+                    for (const card of internalPacks[i].cards.white) state.whiteDeck.push(card);
+                    for (const card of internalPacks[i].cards.black) state.blackDeck.push(card);
                 }
-        
-                if (state.blackDeck.length === 0) {
-                    i.reply({ ephemeral: true, content: "There are no black cards in the selected packs." });
-                    return;
-                }
-        
-                if (state.whiteDeck.length < game.players.length * state.handCards + (state.rando ? 1 : 0)) {
-                    i.reply({ ephemeral: true, content: "There aren't enough white cards in the selected packs to give everyone a full hand." });
-                    return;
-                }
+            }
+    
+            if (state.blackDeck.length === 0) {
+                i.reply({ ephemeral: true, content: "There are no black cards in the selected packs." });
+                return;
+            }
+    
+            if (state.whiteDeck.length < game.players.length * state.handCards + (state.rando ? 1 : 0)) {
+                i.reply({ ephemeral: true, content: "There aren't enough white cards in the selected packs to give everyone a full hand." });
+                return;
+            }
 
-                shuffle(state.whiteDeck);
-                shuffle(state.blackDeck);
+            shuffle(state.whiteDeck);
+            shuffle(state.blackDeck);
 
-                if (state.rando) {
-                    state.players[randoId] = {
-                        hand: [],
-                        playing: [],
-                        points: 0
-                    }
+            if (state.rando) {
+                state.players[randoId] = {
+                    hand: [],
+                    playing: [],
+                    points: 0
                 }
+            }
 
-                msg.endAll(i, false, "_join", "_leave");
-                game.resetControls();
-                game.startLobbies(msg).then(() => resolve());
-            });
+            msg.disableButtons(i, "_join", "_leave");
+            game.resetControls();
+            game.startLobby(m).then(() => resolve());
+        });
     
         msg.reply(i);
     });

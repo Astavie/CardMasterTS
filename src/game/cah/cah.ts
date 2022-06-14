@@ -1,4 +1,4 @@
-import { BaseCommandInteraction, Interaction, MessageComponentInteraction, User } from "discord.js";
+import { ButtonInteraction, User } from "discord.js";
 import { MessageController } from "../../util/message";
 import { Game, GameInstance, shuffle } from "../game";
 import { end } from "./end";
@@ -59,13 +59,7 @@ export function fillCard(card: string, hand: string[], playing: (number | undefi
     });
 }
 
-export function addPlayer(i: Interaction, game: GameInstance, player: User, state: CAHState, resolve: (value: CAHAction) => void, msg: MessageController) {
-    const setup = game.setupMessage?.isMyInteraction(i);
-
-    if (!setup) {
-        // TODO: Slash join
-    }
-
+export function addPlayer(i: ButtonInteraction, game: GameInstance, player: User, state: CAHState, resolve: (value: CAHAction) => void, msg: MessageController) {
     // Add player
     state.players[player.id] = {
         hand: [],
@@ -78,7 +72,7 @@ export function addPlayer(i: Interaction, game: GameInstance, player: User, stat
         const card = state.whiteDeck.pop();
         if (!card) {
             msg.endAll();
-            game.setupMessage?.updateOrEditAll(setup ? i as MessageComponentInteraction : undefined);
+            game.setupMessage?.updateAll(i);
             game.sendAll(new MessageController(() => ({
                 embeds: [{
                     color: CAH.color,
@@ -92,19 +86,12 @@ export function addPlayer(i: Interaction, game: GameInstance, player: User, stat
     }
 
     // Update
-    msg.editAll();
+    msg.updateAll();
     player.createDM().then(dm => msg.send(dm));
-    game.setupMessage?.updateOrEditAll(setup ? i as MessageComponentInteraction : undefined);
+    game.setupMessage?.updateAll(i);
 }
 
-export function removePlayer(i: Interaction, game: GameInstance, player: User, index: number, state: CAHState, resolve: (value: CAHAction) => void, msg: MessageController) {
-    const own = msg.isMyInteraction(i);
-    const setup = game.setupMessage?.isMyInteraction(i);
-
-    if (!own && !setup) {
-        // TODO: Slash join
-    }
-
+export function removePlayer(i: ButtonInteraction, game: GameInstance, player: User, index: number, state: CAHState, resolve: (value: CAHAction) => void, msg: MessageController) {
     const end = () => {
         // Instert player hand back into deck
         for (const card of state.players[player.id].hand) state.whiteDeck.push(card);
@@ -118,9 +105,9 @@ export function removePlayer(i: Interaction, game: GameInstance, player: User, i
 
     // Check if we can still continue playing
     if (game.players.length < 2) {
-        msg.endAll(own ? i as MessageComponentInteraction : undefined);
+        msg.endAll(i);
         end();
-        game.setupMessage?.updateOrEditAll(setup ? i as MessageComponentInteraction : undefined);
+        game.setupMessage?.updateAll(i);
         game.sendAll(new MessageController(() => ({
             embeds: [{
                 color: CAH.color,
@@ -135,9 +122,9 @@ export function removePlayer(i: Interaction, game: GameInstance, player: User, i
     if (state.czar === index) {
         state.czar -= 1;
 
-        msg.endAll(own ? i as MessageComponentInteraction : undefined);
+        msg.endAll(i);
         end();
-        game.setupMessage?.updateOrEditAll(setup ? i as MessageComponentInteraction : undefined);
+        game.setupMessage?.updateAll(i);
         game.sendAll(new MessageController(() => ({
             embeds: [{
                 color: CAH.color,
@@ -151,11 +138,8 @@ export function removePlayer(i: Interaction, game: GameInstance, player: User, i
     }
 
     // Continue
-    if (own && i.channel?.type == "DM") {
-        msg.end(i as MessageComponentInteraction);
-        end();
-        msg.editAll();
-        game.setupMessage?.updateOrEditAll(setup ? i as MessageComponentInteraction : undefined);
+    if (msg.isMyInteraction(i) && i.channel?.type == "DM") {
+        msg.end(i);
     } else {
         for (const m of msg.messages) {
             if (m.channel.type === "DM" && m.channel.recipient === player) {
@@ -163,11 +147,11 @@ export function removePlayer(i: Interaction, game: GameInstance, player: User, i
                 break;
             }
         }
-
-        end();
-        msg.updateOrEditAll(own ? i as MessageComponentInteraction : undefined);
-        game.setupMessage?.updateOrEditAll(setup ? i as MessageComponentInteraction : undefined);
     }
+
+    end();
+    msg.updateAll(i);
+    game.setupMessage?.updateAll(i);
 }
 
 export const randoId = "rando";

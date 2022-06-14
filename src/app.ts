@@ -30,8 +30,6 @@ client.on('interactionCreate', async interaction => {
 	
 	if (!interaction.isCommand()) return;
 
-	const { commandName } = interaction;
-
     switch (interaction.commandName) {
 		case "ping":
 			interaction.reply('Pong!');
@@ -43,7 +41,7 @@ client.on('interactionCreate', async interaction => {
 			}
 
 			for (const game of gameInstances) {
-				if (game.lobbies.includes(interaction.channel)) {
+				if (game.lobby === interaction.channel) {
 					interaction.reply({ ephemeral: true, content: "There's already an active game in this channel!" });
 					return;
 				}
@@ -71,7 +69,7 @@ client.on('interactionCreate', async interaction => {
 			}
 
 			for (const game of gameInstances) {
-				if (game.lobbies.includes(interaction.channel)) {
+				if (game.lobby === interaction.channel) {
 					// Send to players
 					if (game.game.playedInDms) {
 						for (const player of game.players) {
@@ -79,16 +77,8 @@ client.on('interactionCreate', async interaction => {
 						}
 					}
 
-					// Send to lobbies
-					const promises: Promise<any>[] = [];
-					for (const lobby of game.lobbies) {
-						if (lobby === interaction.channel) {
-							promises.push(interaction.reply({ content: "Game forcefully stopped." }));
-						} else {
-							promises.push(lobby.send({ content: "Game forcefully stopped." }));
-						}
-					}
-					await Promise.all(promises);
+					// Send to lobby
+					await interaction.reply({ content: "Game forcefully stopped." });
 
 					// Kill the game
 					game.kill();

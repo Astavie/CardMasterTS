@@ -48,17 +48,17 @@ export class MessageController {
         return i.update(this.message(i.channel, i.message as Message));
     }
 
-    editMessage(m: Message) {
+    updateMessage(m: Message) {
         return m.edit(this.message(m.channel, m));
     }
 
-    updateAll(i: MessageComponentInteraction) {
+    updateAll(i?: MessageComponentInteraction) {
         const promises: Promise<any>[] = [];
 
         for (const msg of this.messages) {
             const message = this.message(msg.channel, msg);
 
-            if (i.message === msg) {
+            if (i && i.message === msg) {
                 promises.push(i.update(message));
             } else {
                 promises.push(msg.edit(message));
@@ -68,61 +68,47 @@ export class MessageController {
         return Promise.all(promises);
     }
 
-    editAll() {
-        const promises: Promise<any>[] = [];
-
-        for (const msg of this.messages) {
-            const message = this.message(msg.channel, msg);
-            promises.push(msg.edit(message));
-        }
-
-        return Promise.all(promises);
-    }
-
-    updateOrEditAll(i?: MessageComponentInteraction) {
-        if (i) {
-            return this.updateAll(i);
-        } else {
-            return this.editAll();
-        }
-    }
-
-    endMessage(msg: Message, ...exceptions: string[]) {
-        const index = this.messages.indexOf(msg);
-        if (index < 0) throw new Error("Message not found");
-
-        this.messages.splice(index, 1)[0];
-        return msg.edit(disableButtons(this.message(msg.channel, msg), ...exceptions));
-    }
-
-    end(i: MessageComponentInteraction, ...exceptions: string[]) {
+    end(i: MessageComponentInteraction) {
         const index = this.messages.indexOf(i.message as Message);
         if (index < 0) throw new Error("Message not found");
 
         const msg = this.messages.splice(index, 1)[0];
-        return i.update(disableButtons(this.message(msg.channel, msg), ...exceptions));
+        return i.update(disableButtons(this.message(msg.channel, msg)));
     }
 
-    endAll(i?: MessageComponentInteraction, remove: boolean = true, ...exceptions: string[]) {
+    endMessage(msg: Message) {
+        const index = this.messages.indexOf(msg);
+        if (index < 0) throw new Error("Message not found");
+
+        this.messages.splice(index, 1)[0];
+        return msg.edit(disableButtons(this.message(msg.channel, msg)));
+    }
+
+    endAll(i?: MessageComponentInteraction) {
         const promises: Promise<any>[] = [];
 
         for (const msg of this.messages) {
-            const message = disableButtons(this.message(msg.channel, msg), ...exceptions);
+            const message = disableButtons(this.message(msg.channel, msg));
 
-            if (i?.message === msg) {
+            if (i && i.message === msg) {
                 promises.push(i.update(message));
             } else {
                 promises.push(msg.edit(message));
             }
         }
 
-        if (remove) this.messages = [];
+        this.messages = [];
 
         return Promise.all(promises);
     }
 
-    isMyInteraction(i: Interaction) {
-        return i.isMessageComponent() && this.messages.includes(i.message as Message);
+    disableButtons(i: MessageComponentInteraction, ...exceptions: string[]) {
+        if (!i.channel) throw new Error("Unknown channel");
+        return i.update(disableButtons(this.message(i.channel, i.message as Message), ...exceptions));
+    }
+
+    isMyInteraction(i: MessageComponentInteraction) {
+        return this.messages.includes(i.message as Message);
     }
 
 }

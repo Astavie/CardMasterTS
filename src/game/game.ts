@@ -27,11 +27,11 @@ export class GameInstance {
     // message: { [key:string]: { [key:string]: (m: Message) => void }} = {};
 
     players: User[] = [];
-    lobbies: TextBasedChannel[] = [];
+    lobby: TextBasedChannel | undefined;
     setupMessage: MessageController | undefined;
 
-    join?: (i: Interaction, player: User) => void;
-    leave?: (i: Interaction, player: User, index: number) => void;
+    join?: (i: ButtonInteraction, player: User) => void;
+    leave?: (i: ButtonInteraction, player: User, index: number) => void;
     maxPlayers: () => number = () => Number.MAX_SAFE_INTEGER + 1;
     minPlayers: () => number = () => 0;
 
@@ -48,11 +48,9 @@ export class GameInstance {
     kill() {
         this.setupMessage?.endAll();
 
-        // archive created threads
-        for (const lobby of this.lobbies) {
-            if (lobby.isThread() && lobby.ownerId === process.env.CLIENT_ID) {
-                lobby.setArchived(true, "Game ended.");
-            }
+        // archive created thread
+        if (this.lobby && this.lobby.isThread() && this.lobby.ownerId === process.env.CLIENT_ID) {
+            this.lobby.setArchived(true, "Game ended.");
         }
     }
 
@@ -91,16 +89,8 @@ export class GameInstance {
 
     async startLobby(msg: Message): Promise<ThreadChannel> {
         const thread = msg.channel.isThread() ? msg.channel : await msg.startThread({ name: CAH.name, autoArchiveDuration: 60 });
-        this.lobbies.push(thread);
+        this.lobby = thread;
         return thread;
-    }
-
-    startLobbies(msg: MessageController): Promise<ThreadChannel[]> {
-        const promises: Promise<ThreadChannel>[] = [];
-
-        for (const m of msg.messages) promises.push(this.startLobby(m));
-
-        return Promise.all(promises);
     }
 
     // easy to use messages
@@ -116,7 +106,7 @@ export class GameInstance {
     sendPublic(msg: MessageController): Promise<Message[]> {
         const promises: Promise<Message>[] = [];
 
-        for (const channel of this.lobbies) promises.push(msg.send(channel));
+        if (this.lobby) promises.push(msg.send(this.lobby));
 
         return Promise.all(promises);
     }
@@ -295,7 +285,7 @@ export class GameInstance {
         });
     }
     
-    setSetupMessage(msg: MessageController, start: (i: ButtonInteraction) => void) {
+    setSetupMessage(msg: MessageController, start: (i: ButtonInteraction, m : Message) => void) {
         this.setupMessage = msg;
 
         // Add buttons
@@ -350,7 +340,7 @@ export class GameInstance {
                     return;
                 }
 
-                start(i);
+                start(i, m);
             });
         });
     }

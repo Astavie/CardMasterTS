@@ -127,7 +127,7 @@ export async function read(game: GameInstance, state: CAHState, msg: MessageCont
         game.addLeaveButton(msg);
         game.addSetupLogic();
         
-        msg.editAll();
+        msg.updateAll();
         game.sendPrivate(msg);
     });
 }

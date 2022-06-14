@@ -145,9 +145,12 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
                 game.onButton(m, `hand_${index}`, i => {
                     const playing = state.players[player.id].playing;
                     const pIndex = playing.indexOf(index);
-                    const uIndex = playing.indexOf(undefined);
+                    let uIndex = playing.indexOf(undefined);
                     if (pIndex === -1) {
-                        if (uIndex === -1) return;
+                        if (uIndex === -1) {
+                            if (blanks === 1) uIndex = 0;
+                            else return;
+                        }
                         playing[uIndex] = index;
 
                         if (playing.indexOf(undefined) === -1) {
