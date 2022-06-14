@@ -235,13 +235,17 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
 
                 for (let i = 0; i < split.length; i++) {
                     if (split[i].length > 45) {
+                        const prevLength = split[i].length;
+
                         let index = split[i].indexOf('_');
-                        if (index + 42 > split[i].length) index = split[i].length - 42;
+                        if (index === -1 || index + 42 > split[i].length) index = split[i].length - 42;
                         split[i] = split[i].substring(index, index + 42);
 
                         if (index > 0) {
                             split[i] = "..." + split[i];
-                        } else {
+                        }
+                        
+                        if (index + 42 < prevLength) {
                             split[i] = split[i] + "...";
                         }
                     }
