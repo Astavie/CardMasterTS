@@ -1,7 +1,7 @@
 import { BaseCommandInteraction } from "discord.js";
 import { MessageController } from "../../util/message";
 import { GameInstance, shuffle } from "../game";
-import { CAH, CAHState, getPlayerList, packs, randoId, requiredCards } from "./cah";
+import { CAH, CAHState, getPlayerList, packs, randoId } from "./cah";
 
 // Packs inside .gitignore
 function conditionalRequire(name: string): any {
@@ -71,7 +71,7 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
                 return;
             }
     
-            if (state.whiteDeck.length < requiredCards(game, state)) {
+            if (state.whiteDeck.length < (state.flags[1] ? 0 : game.players.length * state.handCards) + (state.flags[0] ? 1 : 0)) {
                 i.reply({ ephemeral: true, content: "There aren't enough white cards in the selected packs to give everyone a full hand." });
                 return;
             }

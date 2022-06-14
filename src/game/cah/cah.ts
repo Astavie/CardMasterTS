@@ -1,4 +1,4 @@
-import { ButtonInteraction, User } from "discord.js";
+import { ButtonInteraction, User, Snowflake } from "discord.js";
 import { MessageController } from "../../util/message";
 import { Game, GameInstance, shuffle } from "../game";
 import { end } from "./end";
@@ -29,10 +29,6 @@ export function getPlayerList(players: User[], rando: boolean) {
         ids.unshift("`Rando Cardrissian`");
     }
     return ids.length > 0 ? ids.join("\n") : "*None*";
-}
-
-export function requiredCards(game: GameInstance, state : CAHState) {
-    return (state.flags[1] ? 0 : game.players.length * state.handCards) + (state.flags[0] ? 1 : 0);
 }
 
 export function getPointsList(players: User[], rando: boolean, points: {[key: string]: { points: number }}, maxPoints: number) {
@@ -159,8 +155,8 @@ export function removePlayer(i: ButtonInteraction, game: GameInstance, player: U
 export const randoId = "rando";
 
 function createInitialState() {
-    const state = {
-        players: {} as {[key: string]: {
+    return {
+        players: {} as {[key: Snowflake]: {
             hand: Card[],
             playing: (number | undefined)[],
             points: number,
@@ -183,7 +179,6 @@ function createInitialState() {
         prompt: undefined as Card | undefined,
         czar: -1,
     };
-    return state;
 }
 
 export type CAHState = ReturnType<typeof createInitialState>;

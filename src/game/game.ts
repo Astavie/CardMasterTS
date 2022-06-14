@@ -33,7 +33,7 @@ export class GameInstance {
 
     join?: (i: ButtonInteraction, player: User) => void;
     leave?: (i: ButtonInteraction, player: User, index: number) => void;
-    maxPlayers: () => number = () => Number.MAX_SAFE_INTEGER + 1;
+    maxPlayers: () => number = () => Number.MAX_SAFE_INTEGER;
     minPlayers: () => number = () => 0;
 
     game: Game;
