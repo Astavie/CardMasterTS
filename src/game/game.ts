@@ -25,7 +25,6 @@ export class GameInstance {
     buttons: { [key:Snowflake]: { [key:string]: (i: ButtonInteraction) => void }} = {};
     select: { [key:Snowflake]: { [key:string]: (i: SelectMenuInteraction) => void }} = {};
     modals: { [key:Snowflake]: { [key:string]: (i: ModalSubmitInteraction) => void }} = {};
-    // message: { [key:string]: { [key:string]: (m: Message) => void }} = {};
 
     players: User[] = [];
     lobby: TextBasedChannel | undefined;
@@ -83,19 +82,9 @@ export class GameInstance {
         this.select[inter.message.id]?.[inter.customId]?.(inter);
     }
 
-    // onMessage(channel: Channel, user: User, callback: (i: Message) => any | undefined) {
-    //     this.message[channel.id] = this.message[channel.id] ?? {};
-    //     this.message[channel.id][user.id] = callback;
-    // }
-
-    // resolveMessage(inter: Message) {
-    //     this.message[inter.channel.id]?.[inter.author.id]?.(inter);
-    // }
-
     resetControls() {
         this.buttons = {};
         this.select = {};
-        // this.message = {};
     }
 
     async startLobby(msg: Message): Promise<ThreadChannel> {
