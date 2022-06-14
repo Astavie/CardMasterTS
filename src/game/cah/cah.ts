@@ -92,7 +92,7 @@ export function addPlayer(i: ButtonInteraction, game: GameInstance, player: User
 }
 
 export function removePlayer(i: ButtonInteraction, game: GameInstance, player: User, index: number, state: CAHState, resolve: (value: CAHAction) => void, msg: MessageController) {
-    const end = () => {
+    const remove = () => {
         // Instert player hand back into deck
         for (const card of state.players[player.id].hand) state.whiteDeck.push(card);
         shuffle(state.whiteDeck);
@@ -101,20 +101,26 @@ export function removePlayer(i: ButtonInteraction, game: GameInstance, player: U
         delete state.players[player.id];
         const sindex = state.shuffle.indexOf(player.id);
         if (sindex >= 0) state.shuffle.splice(sindex, 1);
-    };
-
-    // Check if we can still continue playing
-    if (game.players.length < 2) {
+    }
+    
+    const end = (reason : string, action : CAHAction) => {
         msg.endAll(i);
-        end();
+
+        remove();
+
         game.setupMessage?.updateAll(i);
         game.sendAll(new MessageController(() => ({
             embeds: [{
                 color: CAH.color,
-                description: "**The game has ended because there are not enough players left.**"
+                description: reason
             }]
         })));
-        resolve(CAHAction.End);
+        resolve(action);
+    };
+
+    // Check if we can still continue playing
+    if (game.players.length < 2) {
+        end("**The game has ended because there are not enough players left.**", CAHAction.End);
         return;
     }
 
@@ -122,16 +128,7 @@ export function removePlayer(i: ButtonInteraction, game: GameInstance, player: U
     if (state.czar === index) {
         state.czar -= 1;
 
-        msg.endAll(i);
-        end();
-        game.setupMessage?.updateAll(i);
-        game.sendAll(new MessageController(() => ({
-            embeds: [{
-                color: CAH.color,
-                description: "**The round has been skipped because the Card Czar left the game.**"
-            }]
-        })));
-        resolve(CAHAction.Skip);
+        end("**The round has been skipped because the Card Czar left the game.**", CAHAction.Skip);
         return;
     } else if (state.czar > index) {
         state.czar -= 1;
@@ -149,7 +146,7 @@ export function removePlayer(i: ButtonInteraction, game: GameInstance, player: U
         }
     }
 
-    end();
+    remove();
     msg.updateAll(i);
     game.setupMessage?.updateAll(i);
 }
