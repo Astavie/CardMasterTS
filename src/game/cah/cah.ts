@@ -63,7 +63,7 @@ export function addPlayer(i: ButtonInteraction, game: GameInstance, player: User
     // Add player
     state.players[player.id] = {
         hand: [],
-        playing: [],
+        playing: state.prompt ? Array(getBlanks(state.prompt)).fill(undefined) : [],
         points: 0,
         hidden: false,
     }
