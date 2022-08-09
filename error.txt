@@ -1,0 +1,26 @@
+
+/run/media/astavie/ExternalSSD/Code/NodeJS/CardMaster3/build/game/cah/c
+ah.js:45
+        if (card.endsWith('.')) {
+                 ^
+
+TypeError: Cannot read properties of undefined (reading 'endsWith')
+    at /run/media/astavie/ExternalSSD/Code/NodeJS/CardMaster3/build/gam
+e/cah/cah.js:45:18
+    at String.replaceAll (<anonymous>)
+    at fillCard (/run/media/astavie/ExternalSSD/Code/NodeJS/CardMaster3
+/build/game/cah/cah.js:43:17)
+    at msg.message (/run/media/astavie/ExternalSSD/Code/NodeJS/CardMast
+er3/build/game/cah/play.js:84:49)
+    at MessageController.msg.message (/run/media/astavie/ExternalSSD/Co
+de/NodeJS/CardMaster3/build/game/game.js:222:23)
+    at MessageController.send (/run/media/astavie/ExternalSSD/Code/Node
+JS/CardMaster3/build/util/message.js:32:45)
+    at /run/media/astavie/ExternalSSD/Code/NodeJS/CardMaster3/build/gam
+e/cah/cah.js:79:38
+    at runMicrotasks (<anonymous>)
+    at processTicksAndRejections (node:internal/process/task_queues:96:
+5)
+
+    /run/me/a/E/C/No/CardMaster3    main !1 
+❯

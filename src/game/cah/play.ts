@@ -84,11 +84,14 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
 
             let prompt = state.prompt as string;
 
+            const playedCards = Object.values(state.players).filter(p => !p.playing.includes(undefined)).length;
+            const totalPlayers = Object.values(state.players).length - 1;
+
             if (player && game.players[state.czar] !== player) {
                 const pstate = state.players[player.id];
                 const playing = pstate.playing;
 
-                if (!pstate.hidden) {
+                if (!pstate.hidden || playedCards === totalPlayers) {
                     prompt = fillCard(prompt, pstate.hand, pstate.playing);
                 }
 
@@ -148,12 +151,7 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
             prompt = `> ${prompt}`
             prompt = `Card Czar: ${game.players[state.czar]}\n\n${prompt}`;
 
-            const played =
-                Object.values(state.players).filter(p => !p.playing.includes(undefined)).length +
-                "/" +
-                (Object.values(state.players).length - 1);
-            
-            const message = prompt + `\n\n*${played} players have selected ${blanks === 1 ? "a card" : "their cards"}.*`;
+            const message = prompt + `\n\n*${playedCards}/${totalPlayers} players have selected ${blanks === 1 ? "a card" : "their cards"}.*`;
 
             fields.unshift({
                 name: "Prompt",
@@ -246,6 +244,7 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
                         }
                         
                         if (index + 42 < prevLength) {
+                            split[i] = split[i].substring(0, 42);
                             split[i] = split[i] + "...";
                         }
                     }
@@ -255,21 +254,21 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
                     i.showModal({
                         customId: "fill_modal",
                         title: "Fill in the blanks",
-                        components: [{
+                        components: split.map((s, i) => ({
                             type: "ACTION_ROW",
-                            components: split.map((s, i) => ({
+                            components: [{
                                 type: "TEXT_INPUT",
                                 customId: `blank_${i}`,
                                 style: "SHORT",
                                 label: s
-                            }))
-                        }]
+                            }]
+                        }))
                     })
                 });
 
                 game.onModal(m, "fill_modal", async i => {
-                    state.players[player.id].hand    = i.components[0].components.map(c => c.value);
-                    state.players[player.id].playing = i.components[0].components.map((_, i) => i);
+                    state.players[player.id].hand    = i.components.map(c => c.components[0].value);
+                    state.players[player.id].playing = i.components.map((_, i) => i);
                     check(i);
                 });
                 
