@@ -3,7 +3,7 @@ import { config } from "dotenv";
 config();
 
 // Require the necessary discord.js classes
-import { Client, Intents, Message } from 'discord.js';
+import { Client, Intents } from 'discord.js';
 import { GameInstance, gameInstances, games } from "./game/game";
 
 // Create a new client instance
@@ -18,17 +18,26 @@ client.once('ready', () => {
 client.on('interactionCreate', async interaction => {
     if (interaction.isButton()) {
 		for (const game of gameInstances) {
-			game.resolveButton(interaction);
+            if (game.isMyInteraction(interaction)) {
+                game.resolveButton(interaction);
+                return;
+            }
 		}
 		return;
 	} else if (interaction.isSelectMenu()) {
 		for (const game of gameInstances) {
-			game.resolveSelect(interaction);
+            if (game.isMyInteraction(interaction)) {
+                game.resolveSelect(interaction);
+                return;
+            }
 		}
 		return;
 	} else if (interaction.isModalSubmit()) {
 		for (const game of gameInstances) {
-			game.resolveModal(interaction);
+            if (game.isMyInteraction(interaction)) {
+                game.resolveModal(interaction);
+                return;
+            }
 		}
 		return;
 	}
@@ -63,9 +72,7 @@ client.on('interactionCreate', async interaction => {
 				return;
 			}
 
-			const instance = new GameInstance(newGame);
-			gameInstances.push(instance);
-			instance.play(interaction);
+			new GameInstance(newGame).play(interaction);
 			return;
 		case "stop":
 			if (!interaction.channel) {
@@ -87,10 +94,12 @@ client.on('interactionCreate', async interaction => {
 
 					// Kill the game
 					game.kill();
-					gameInstances.splice(gameInstances.indexOf(game), 1);
 					return;
 				}
 			}
+
+
+            interaction.reply({ ephemeral: true, content: "There's no active game in this channel!" });
 			return;
 	}
 });

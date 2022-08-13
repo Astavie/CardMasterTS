@@ -1,29 +1,17 @@
-import { BaseCommandInteraction } from "discord.js";
-import { MessageController } from "../../util/message";
+import { BaseCommandInteraction, Message } from "discord.js";
 import { GameInstance, shuffle } from "../game";
-import { CAH, CAHState, getPlayerList, packs, randoId } from "./cah";
-
-// Packs inside .gitignore
-function conditionalRequire(name: string): any {
-    try {
-        return require(name);
-    } catch (_) {}
-    return undefined;
-}
-
-const eppgroep = conditionalRequire("./packs/eppgroep")?.eppgroep;
+import { CAH, CAHState, epack, getPlayerList, packs, randoId } from "./cah";
 
 export function setup(game: GameInstance, state: CAHState, i: BaseCommandInteraction): Promise<void> {
     return new Promise<void>(resolve => {
         const internalPacks = [...packs];
-        if (eppgroep && process.env.EPPGROEP && i.guildId === process.env.EPPGROEP) {
-            internalPacks.push({ name: "EPPGroep", cards: eppgroep });
-            internalPacks.push({ name: "EPPGroep", cards: eppgroep });
+        if (epack && i.guildId === process.env.EPPGROEP) {
+            internalPacks.push(epack);
         }
     
         const packsPicked = internalPacks.map((_p, i) => i === 0);
     
-        const msg = new MessageController(() => ({
+        game.createMessage(() => ({
             embeds: [{
                 color: CAH.color,
                 title: CAH.name,
@@ -41,20 +29,22 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
                 points: 0,
                 hidden: false,
             };
-            msg.updateAll(i);
+            game.setupMessage!.updateAll(i);
         };
         game.leave = (i, player) => {
             delete state.players[player.id];
-            msg.updateAll(i);
+            game.setupMessage!.updateAll(i);
         };
         game.minPlayers = () => 2;
         game.maxPlayers = () => 20;
         
-        game.addFlagsInput(msg, "Packs", internalPacks.map(p => p.name), packsPicked);
-        game.addFlagsInput(msg, "Rules", ["Rando Cardrissian", "Quiplash Mode"], state.flags);
-        game.addNumberInput(msg, "Points", 1, 8, Number.MAX_SAFE_INTEGER, value => state.maxPoints = value);
-        game.addNumberInput(msg, "Cards", 5, 10, 20, value => state.handCards = value);
-        game.setSetupMessage(msg, (i, m) => {
+        game.addFlagsInput("Packs", internalPacks.map(p => p.name), packsPicked);
+        game.addFlagsInput("Rules", ["Rando Cardrissian", "Quiplash Mode"], state.flags);
+        game.addNumberInput("Points", 1, 8, Number.MAX_SAFE_INTEGER, value => state.maxPoints = value);
+        game.addNumberInput("Cards", 5, 10, 20, value => state.handCards = value);
+        game.setSetupMessage(i => {
+            if (!i.message) return;
+
             // START
             state.whiteDeck = [];
             state.blackDeck = [];
@@ -88,11 +78,11 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
                 }
             }
 
-            msg.disableButtons(i, "_join", "_leave");
+            game.setupMessage!.disableButtons(i, "_join", "_leave");
             game.resetControls();
-            game.startLobby(m).then(() => resolve());
+            game.startLobby(i.message as Message).then(() => resolve());
         });
     
-        msg.reply(i);
+        game.setupMessage!.reply(i);
     });
 }

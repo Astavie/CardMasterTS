@@ -1,26 +1,26 @@
 import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowComponentResolvable, MessageActionRowOptions, MessageComponentInteraction, ModalSubmitInteraction } from "discord.js";
-import { MessageController } from "../../util/message";
+import { countBlanks, escapeDiscord, fillBlanks, fillModal, fillPlayers } from "../../util/card";
 import { GameInstance, shuffle } from "../game";
-import { CAH, CAHState, getBlanks, randoId, realizeCard, CAHAction, addPlayer, removePlayer, fillCard } from "./cah";
+import { CAH, CAHState, randoId, CAHAction, addPlayer, removePlayer } from "./cah";
 
-export function play(game: GameInstance, state: CAHState, msg: MessageController): Promise<CAHAction> {
+export function play(game: GameInstance, state: CAHState): Promise<CAHAction> {
     return new Promise<CAHAction>(resolve => {
         // Get black card
         const card = state.blackDeck.pop();
 
         if (!card) {
-            game.sendAll(new MessageController(() => ({
+            game.sendAll(() => ({
                 embeds: [{
                     color: CAH.color,
                     description: "**The game has ended because there are no more black cards left.**"
                 }]
-            })));
+            }));
             resolve(CAHAction.End);
             return;
         }
 
-        state.prompt = realizeCard(card, game.players);
-        const blanks = getBlanks(state.prompt);
+        state.prompt = fillPlayers(card, game.players);
+        const blanks = countBlanks(state.prompt);
 
         // Give white cards
         if (!state.flags[1]) {
@@ -29,16 +29,16 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
                 while (hand.length < state.handCards) {
                     const card = state.whiteDeck.pop();
                     if (!card) {
-                        game.sendAll(new MessageController(() => ({
+                        game.sendAll(() => ({
                             embeds: [{
                                 color: CAH.color,
                                 description: "**The game has ended because there are not enough white cards left.**"
                             }]
-                        })));
+                        }));
                         resolve(CAHAction.End);
                         return;
                     }
-                    hand.push(realizeCard(card, game.players));
+                    hand.push(fillPlayers(card, game.players));
                 }
             }
         } else {
@@ -59,15 +59,15 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
             for (let i = 0; i < blanks; i++) {
                 const card = state.whiteDeck.pop();
                 if (!card) {
-                    game.sendAll(new MessageController(() => ({
+                    game.sendAll(() => ({
                         embeds: [{
                             color: CAH.color,
                             description: "**The game has ended because there are not enough white cards left.**"
                         }]
-                    })));
+                    }));
                     return false;
                 }
-                state.players[randoId].hand.push(realizeCard(card, game.players));
+                state.players[randoId].hand.push(fillPlayers(card, game.players));
             }
             state.players[randoId].playing = state.players[randoId].hand.map((_, i) => i);
         }
@@ -75,7 +75,7 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
         const randomDisabled = state.whiteDeck.length < blanks * game.players.length;
 
         // Display round
-        msg.message = channel => {
+        game.activeMessage!.message = channel => {
             const fields: EmbedFieldData[] = [];
 
             const player = channel.type == "DM" ? channel.recipient : undefined;
@@ -92,7 +92,7 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
                 const playing = pstate.playing;
 
                 if (!pstate.hidden || playedCards === totalPlayers) {
-                    prompt = fillCard(prompt, pstate.hand, pstate.playing);
+                    prompt = fillBlanks(prompt, pstate.playing.map(i => i === undefined ? undefined : pstate.hand[i]));
                 }
 
                 if (!state.flags[1]) {
@@ -144,8 +144,6 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
                         }]
                     });
                 }
-            } else {
-                prompt = prompt.replaceAll("_", "\\_");
             }
 
             prompt = `> ${prompt}`
@@ -167,144 +165,95 @@ export function play(game: GameInstance, state: CAHState, msg: MessageController
             };
         };
 
-        // Select card logic
-        msg.consumers = [m => {
-            const player = m.channel.type == "DM" ? m.channel.recipient : undefined;
-        
-            if (!player || !game.players.includes(player) || game.players[state.czar] === player) return;
-
-            const check = (i : MessageComponentInteraction | ModalSubmitInteraction) => {
-                if (game.players.every((p, i) => state.czar === i || !state.players[p.id].playing.includes(undefined))) {
-                    // All players are ready
-                    msg.end(i);
-                    for (const m of [...msg.messages]) {
-                        if (m.channel.type == "DM") {
-                            msg.endMessage(m);
-                        }
+        const check = (i : MessageComponentInteraction | ModalSubmitInteraction) => {
+            if (game.players.every((p, i) => state.czar === i || !state.players[p.id].playing.includes(undefined))) {
+                // All players are ready
+                game.activeMessage!.end(i);
+                for (const m of Object.values({ ...game.activeMessage!.messages })) {
+                    if (m.channel.type == "DM") {
+                        game.activeMessage!.endMessage(m);
                     }
-                    game.resetControls();
-                    resolve(CAHAction.Continue);
-                } else {
-                    msg.updateAll(i);
                 }
-            };
-
-            if (!state.flags[1]) {
-                for (let index = 0; index < state.handCards; index++) {
-                    game.onButton(m, `hand_${index}`, i => {
-                        const playing = state.players[player.id].playing;
-                        const pIndex = playing.indexOf(index);
-                        let uIndex = playing.indexOf(undefined);
-                        if (pIndex === -1) {
-                            if (uIndex === -1) {
-                                if (blanks === 1) uIndex = 0;
-                                else return;
-                            }
-                            playing[uIndex] = index;
-
-                            if (playing.indexOf(undefined) === -1) {
-                                check(i);
-                            } else {
-                                msg.update(i);
-                            }
-                        } else {
-                            playing[pIndex] = undefined;
-
-                            if (uIndex === -1) {
-                                msg.updateAll(i);
-                            } else {
-                                msg.update(i);
-                            }
-                        }
-                    });
-                }
+                game.resetControls();
+                resolve(CAHAction.Continue);
             } else {
-                const split = (state.prompt as string).split('_');
+                game.activeMessage!.updateAll(i);
+            }
+        };
 
-                for (let i = 0; i < split.length - 1; i++) {
-                    split[i] += "_";
-                }
-
-                if (split.length > 1) {
-                    const second = split.length - 2;
-                    const last = split.length - 1;
-                    split[second] += split.splice(last, 1)[0];
-                }
-
-                for (let i = 0; i < split.length; i++) {
-                    if (split[i].length > 45) {
-                        const prevLength = split[i].length;
-
-                        let index = split[i].indexOf('_');
-                        if (index === -1 || index + 42 > split[i].length) index = split[i].length - 42;
-                        split[i] = split[i].substring(index, index + 42);
-
-                        if (index > 0) {
-                            split[i] = "..." + split[i];
+        // Select card logic
+        if (!state.flags[1]) {
+            for (let index = 0; index < state.handCards; index++) {
+                game.onButton(`hand_${index}`, i => {
+                    const player = i.user;
+                    const playing = state.players[player.id].playing;
+                    const pIndex = playing.indexOf(index);
+                    let uIndex = playing.indexOf(undefined);
+                    if (pIndex === -1) {
+                        if (uIndex === -1) {
+                            if (blanks === 1) uIndex = 0;
+                            else return;
                         }
-                        
-                        if (index + 42 < prevLength) {
-                            split[i] = split[i].substring(0, 42);
-                            split[i] = split[i] + "...";
+                        playing[uIndex] = index;
+
+                        if (playing.indexOf(undefined) === -1) {
+                            check(i);
+                        } else {
+                            game.activeMessage!.update(i);
                         }
-                    }
-                }
-                
-                game.onButton(m, "fill", async i => {
-                    i.showModal({
-                        customId: "fill_modal",
-                        title: "Fill in the blanks",
-                        components: split.map((s, i) => ({
-                            type: "ACTION_ROW",
-                            components: [{
-                                type: "TEXT_INPUT",
-                                customId: `blank_${i}`,
-                                style: "SHORT",
-                                label: s
-                            }]
-                        }))
-                    })
-                });
-
-                game.onModal(m, "fill_modal", async i => {
-                    state.players[player.id].hand    = i.components.map(c => c.components[0].value);
-                    state.players[player.id].playing = i.components.map((_, i) => i);
-                    check(i);
-                });
-                
-                game.onButton(m, "random", async i => {
-                    if (randomDisabled) return;
-
-                    const pstate = state.players[player.id];
-                    if (pstate.hidden) {
-                        pstate.hidden = false;
-
-                        for (const card of pstate.hand) state.whiteDeck.push(card);
-                        shuffle(state.whiteDeck);
-
-                        pstate.hand = [];
-                        pstate.playing = Array(blanks).fill(undefined);
-
-                        msg.updateAll(i);
                     } else {
-                        pstate.hidden = true;
+                        playing[pIndex] = undefined;
 
-                        while (pstate.hand.length < blanks) pstate.hand.push(state.whiteDeck.pop() as string);
-                        state.players[player.id].playing = state.players[player.id].hand.map((_, i) => i);
-
-                        check(i);
+                        if (uIndex === -1) {
+                            game.activeMessage!.updateAll(i);
+                        } else {
+                            game.activeMessage!.update(i);
+                        }
                     }
                 });
             }
-        }];
+        } else {
+            game.onButton("fill", fillModal(state.prompt!));
+
+            game.onModal("fill_modal", i => {
+                const player = i.user;
+                state.players[player.id].hand    = i.components.map(c => escapeDiscord(c.components[0].value));
+                state.players[player.id].playing = i.components.map((_, i) => i);
+                check(i);
+            });
+
+            game.onButton("random", i => {
+                if (randomDisabled) return;
+                const player = i.user;
+                const pstate = state.players[player.id];
+                if (pstate.hidden) {
+                    pstate.hidden = false;
+
+                    for (const card of pstate.hand) state.whiteDeck.push(card);
+                    shuffle(state.whiteDeck);
+
+                    pstate.hand = [];
+                    pstate.playing = Array(blanks).fill(undefined);
+
+                    game.activeMessage!.updateAll(i);
+                } else {
+                    pstate.hidden = true;
+
+                    while (pstate.hand.length < blanks) pstate.hand.push(state.whiteDeck.pop() as string);
+                    state.players[player.id].playing = state.players[player.id].hand.map((_, i) => i);
+
+                    check(i);
+                }
+            });
+        }
 
         // Join and leave logic
-        game.join = (i, player) => addPlayer(i, game, player, state, resolve, msg);
-        game.leave = (i, player, index) => removePlayer(i, game, player, index, state, resolve, msg);
+        game.join = (i, player) => addPlayer(i, game, player, state, resolve);
+        game.leave = (i, player, index) => removePlayer(i, game, player, index, state, resolve);
 
-        game.addLeaveButton(msg, !state.flags[1]);
-        game.addSetupLogic();
+        game.addLeaveButton(!state.flags[1]);
+        game.addSupportedLogic();
         
-        game.sendAll(msg);
+        game.sendAll();
     });
 }
