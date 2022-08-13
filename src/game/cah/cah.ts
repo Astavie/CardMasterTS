@@ -203,6 +203,7 @@ export const CAH: Game = {
         loop:
         while(true) {
             game.createMessage();
+            game.activeMessage!.forceList = true;
             switch (await play(game, state)) {
                 case CAHAction.End: break loop;
                 case CAHAction.Skip: continue loop;
