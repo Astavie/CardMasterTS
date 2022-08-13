@@ -9,8 +9,8 @@ import { SlashCommandBuilder } from "@discordjs/builders";
 import { games } from "./game/game";
 
 const commands = [
-	new SlashCommandBuilder().setName('ping').setDescription('Replies with pong!'),
-	new SlashCommandBuilder().setName('stop').setDescription('Stops the game in the current channel.'),
+    new SlashCommandBuilder().setName('ping').setDescription('Replies with pong!'),
+    new SlashCommandBuilder().setName('stop').setDescription('Stops the game in the current channel.'),
     new SlashCommandBuilder()
         .setName('play')
         .setDescription('Play a game in the current channel.')
@@ -23,10 +23,10 @@ const commands = [
                     value: name
                 }))))
 ]
-	.map(command => command.toJSON());
+    .map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN as string);
 
 rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID as string, process.env.GUILD_ID as string), { body: commands })
-	.then(() => console.log('Successfully registered application commands.'))
-	.catch(console.error);
+    .then(() => console.log('Successfully registered application commands.'))
+    .catch(console.error);
