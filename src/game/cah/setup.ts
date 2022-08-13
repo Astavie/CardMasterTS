@@ -7,6 +7,7 @@ export function setup(game: GameInstance, state: CAHState, i: BaseCommandInterac
         const internalPacks = [...packs];
         if (epack && i.guildId === process.env.EPPGROEP) {
             internalPacks.push(epack);
+            internalPacks.push(epack);
         }
     
         const packsPicked = internalPacks.map((_p, i) => i === 0);
