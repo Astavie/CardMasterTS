@@ -1,11 +1,10 @@
 import { ButtonInteraction, User, Snowflake } from "discord.js";
 import { countBlanks, escapeDiscord, fillPlayers } from "../../util/card";
-import { MessageController } from "../../util/message";
 import { Game, GameInstance, shuffle } from "../game";
 import { end } from "./end";
+import { displayHAND, resumeHAND, setupHAND } from "./hand";
 import { basePack, fullPack } from "./packs/cahstandard";
-import { play } from "./play";
-import { read } from "./read";
+import { displayREAD, resumeREAD } from "./read";
 import { setup } from "./setup";
 
 export type Card = string;
@@ -33,10 +32,15 @@ function conditionalRequire(name: string): any {
 }
 
 const eppgroep = conditionalRequire("./packs/eppgroep")?.eppgroep;
-export const epack = eppgroep ? escapePack({
-    name: "EPPGroep",
-    cards: eppgroep,
-}) : undefined;
+
+if (eppgroep) {
+    const epack = escapePack({
+        name: "EPPGroep",
+        cards: eppgroep,
+    });
+    packs.push(epack);
+    packs.push(epack);
+}
 
 function escapePack(p: Pack) {
     p.cards.white = p.cards.white.map(escapeDiscord);
@@ -60,63 +64,62 @@ export function getPointsList(players: User[], rando: boolean, points: {[key: st
     return ids.join("\n") + (maxPoints ? "\n`" + maxPoints.toString().padStart(2) + "` points to win" : "");
 }
 
-export function addPlayer(i: ButtonInteraction, game: GameInstance, player: User, state: CAHState, resolve: (value: CAHAction) => void) {
+export function addPlayer(i: ButtonInteraction, game: GameInstance<CAHContext, CAHState>, player: User): Promise<CAHState> | null {
     // Add player
-    state.players[player.id] = {
+    game.players.push(player);
+    game.context.players[player.id] = {
         hand: [],
-        playing: state.prompt ? Array(countBlanks(state.prompt)).fill(undefined) : [],
+        playing: game.context.prompt ? Array(countBlanks(game.context.prompt)).fill(undefined) : [],
         points: 0,
         hidden: false,
     }
 
-    const hand = state.players[player.id].hand;
-    while (hand.length < state.handCards) {
-        const card = state.whiteDeck.pop();
+    const hand = game.context.players[player.id].hand;
+    while (hand.length < game.context.handCards) {
+        const card = getWhiteCard(game.context);
         if (!card) {
-            game.activeMessage!.endAll();
-            game.setupMessage!.updateAll(i);
+            game.activeMessage.endAll();
+            game.setupMessage.updateAll(i);
             game.sendAll(() => ({
                 embeds: [{
                     color: CAH.color,
                     description: "**The game has ended because there are not enough white cards left.**"
                 }]
             }));
-            resolve(CAHAction.End);
-            return;
+            return Promise.resolve("END");
         }
         hand.push(fillPlayers(card, game.players));
     }
 
     // Update
-    const msg = game.activeMessage!;
+    const msg = game.activeMessage;
     msg.updateAll();
     player.createDM().then(dm => msg.send(dm));
-    game.setupMessage!.updateAll(i);
+    game.setupMessage.updateAll(i);
+    return null;
 }
 
-export function removePlayer(i: ButtonInteraction, game: GameInstance, player: User, index: number, state: CAHState, resolve: (value: CAHAction) => void) {
+export function removePlayer(i: ButtonInteraction, game: GameInstance<CAHContext, CAHState>, player: User, index: number): Promise<CAHState> | null {
     const remove = () => {
-        // Instert player hand back into deck
-        for (const card of state.players[player.id].hand) state.whiteDeck.push(card);
-        shuffle(state.whiteDeck);
+        game.players.splice(index, 1);
 
         // Change Czar
-        if (state.czar >= index) {
-            state.czar -= 1;
+        if (game.context.czar >= index) {
+            game.context.czar -= 1;
         }
 
         // Leave
-        delete state.players[player.id];
-        const sindex = state.shuffle.indexOf(player.id);
-        if (sindex >= 0) state.shuffle.splice(sindex, 1);
+        delete game.context.players[player.id];
+        const sindex = game.context.shuffle.indexOf(player.id);
+        if (sindex >= 0) game.context.shuffle.splice(sindex, 1);
     }
     
-    const end = (reason : string) => {
-        game.activeMessage!.endAll(i);
+    const endMessage = (reason : string) => {
+        game.activeMessage.endAll(i);
 
         remove();
 
-        game.setupMessage!.updateAll(i);
+        game.setupMessage.updateAll(i);
         game.sendAll(() => ({
             embeds: [{
                 color: CAH.color,
@@ -126,21 +129,19 @@ export function removePlayer(i: ButtonInteraction, game: GameInstance, player: U
     };
 
     // Check if we can still continue playing
-    if (game.players.length < 2) {
-        end("**The game has ended because there are not enough players left.**");
-        resolve(CAHAction.End);
-        return;
+    if (game.players.length - 1 < 2) {
+        endMessage("**The game has ended because there are not enough players left.**");
+        return Promise.resolve("END");
     }
 
     // Check if we need to skip a round
-    if (state.czar === index) {
-        end("**The round has been skipped because the Card Czar left the game.**");
-        resolve(CAHAction.Skip);
-        return;
+    if (game.context.czar === index) {
+        endMessage("**The round has been skipped because the Card Czar left the game.**");
+        return Promise.resolve(setupHAND(game));
     }
 
     // Continue
-    const msg = game.activeMessage!;
+    const msg = game.activeMessage;
 
     if (i.channel?.type === "DM") {
         msg.end(i);
@@ -151,16 +152,51 @@ export function removePlayer(i: ButtonInteraction, game: GameInstance, player: U
 
     remove();
     msg.updateAll(i);
-    game.setupMessage!.updateAll(i);
+    game.setupMessage.updateAll(i);
+    return null;
 }
 
 export const randoId = "rando";
 
-function createInitialState() {
+export function getWhiteCard(ctx: CAHContext) {
+    const idx = ctx.whiteDeck.pop();
+    if (!idx) return null;
+
+    let size = 0;
+    for (let i = 0; i < packs.length; i++) {
+        if (ctx.packs.includes(i)) {
+            if (idx >= size + packs[i].cards.white.length) {
+                size += packs[i].cards.white.length;
+            } else {
+                return packs[i].cards.white[idx - size];
+            }
+        }
+    }
+    return null;
+}
+
+export function getBlackCard(ctx: CAHContext) {
+    const idx = ctx.blackDeck.pop();
+    if (!idx) return null;
+
+    let size = 0;
+    for (let i = 0; i < packs.length; i++) {
+        if (ctx.packs.includes(i)) {
+            if (idx >= size + packs[i].cards.black.length) {
+                size += packs[i].cards.black.length;
+            } else {
+                return packs[i].cards.black[idx - size];
+            }
+        }
+    }
+    return null;
+}
+
+function createContext() {
     return {
         players: {} as {[key: Snowflake]: {
             hand: Card[],
-            playing: (number | undefined)[],
+            playing: (number | string | null)[],
             points: number,
             hidden: boolean,
         }},
@@ -175,45 +211,31 @@ function createInitialState() {
         maxPoints: 8,
         handCards: 10,
 
-        blackDeck: [] as Card[],
-        whiteDeck: [] as Card[],
+        packs: [] as number[],
+        blackDeck: [] as number[],
+        whiteDeck: [] as number[],
 
-        prompt: undefined as Card | undefined,
+        prompt: null as Card | null,
         czar: -1,
     };
 }
 
-export type CAHState = ReturnType<typeof createInitialState>;
+export type CAHContext = ReturnType<typeof createContext>;
+export type CAHState = "HAND" | "READ" | "END";
 
-export enum CAHAction {
-    End,
-    Skip,
-    Continue
-}
-
-export const CAH: Game = {
+export const CAH: Game<CAHContext, CAHState> = {
     name: "Crappy Ableist Humor",
-    color: "#000000",
+    color: 0x000000,
     playedInDms: true,
-    play: async (game, i) => {
-        const state = createInitialState();
-
-        await setup(game, state, i);
-
-        loop:
-        while(true) {
-            game.createMessage();
-            game.activeMessage!.forceList = true;
-            switch (await play(game, state)) {
-                case CAHAction.End: break loop;
-                case CAHAction.Skip: continue loop;
-            }
-            switch (await read(game, state)) {
-                case CAHAction.End: break loop;
-                case CAHAction.Skip: continue loop;
-            }
-        }
-
-        await end(game, state);
+    createContext,
+    setup,
+    change: {
+        HAND: displayHAND,
+        READ: displayREAD,
+    },
+    resume: {
+        HAND: resumeHAND,
+        READ: resumeREAD,
+        END: end,
     }
 }

@@ -1,56 +1,129 @@
-import { ButtonInteraction, ColorResolvable, BaseCommandInteraction, Message, SelectMenuInteraction, User, MessageActionRowComponentOptions, TextBasedChannel, ThreadChannel, Snowflake, ModalSubmitInteraction, MessageActionRowComponentResolvable, MessageComponentInteraction } from "discord.js";
-import { MessageController, MessageGenerator } from "../util/message";
+import { ButtonInteraction, ColorResolvable, BaseCommandInteraction, Message, SelectMenuInteraction, User, MessageActionRowComponentOptions, TextBasedChannel, ThreadChannel, ModalSubmitInteraction, MessageActionRowComponentResolvable, MessageComponentInteraction, Snowflake, Client } from "discord.js";
+import { MessageController, MessageGenerator, MessageOptions, MessageSave } from "../util/message";
 import { CAH } from "./cah/cah";
 
 // Games
-export const gameInstances: GameInstance[] = [];
-export const games: {[key: string]: Game} = {};
+export const gameInstances: GameInstance<any, any>[] = [];
+export const games: {[key: string]: Game<any, any>} = {};
 
-function addGame(game: Game): void {
+function addGame(game: Game<any, any>): void {
     games[game.name] = game;
 }
 
 addGame(CAH);
 
 // Classes
-export type Game = {
+export type Game<Context extends object, State extends string> = {
     name: string,
     color: ColorResolvable,
     playedInDms: boolean,
-    play: (game: GameInstance, i: BaseCommandInteraction) => Promise<void>
+    createContext: () => Context,
+
+    setup: (game: GameInstance<Context, State>) => void,
+    resume: {[s in State]: (game: GameInstance<Context, State>) => void},
+    change: {[s in State]?: (game: GameInstance<Context, State>) => void},
 }
 
-export class GameInstance {
 
-    buttons: { [key:string]: (i: ButtonInteraction) => void } = {};
-    select:  { [key:string]: (i: SelectMenuInteraction) => void } = {};
-    modals:  { [key:string]: (i: ModalSubmitInteraction) => void } = {};
+export type GameSave<Context extends object, State extends string> = {
+    game: string,
+    players: Snowflake[],
+    setupMessage: MessageSave,
+    activeMessage: MessageSave,
+    state: State,
+    context: Context,
+    lobby?: Snowflake,
+}
 
-    players: User[] = [];
-    lobby: TextBasedChannel | undefined;
-    setupMessage: MessageController | undefined;
-    activeMessage: MessageController | undefined;
+export class GameInstance<Context extends object, State extends string> {
 
-    join?: (i: ButtonInteraction, player: User) => void;
-    leave?: (i: ButtonInteraction, player: User, index: number) => void;
+    buttons: {[key:string]: (i: ButtonInteraction) => Promise<State> | null} = {};
+    select:  {[key:string]: (i: SelectMenuInteraction) => Promise<State> | null} = {};
+    modals:  {[key:string]: (i: ModalSubmitInteraction) => Promise<State> | null} = {};
+
+    join?: (i: ButtonInteraction, player: User) => Promise<State> | null;
+    leave?: (i: ButtonInteraction, player: User, index: number) => Promise<State> | null;
     maxPlayers: () => number = () => Number.MAX_SAFE_INTEGER;
     minPlayers: () => number = () => 0;
 
-    game: Game;
+    game: Game<Context, State>;
 
-    constructor(game: Game) {
+    // The following will be saved to a file
+    players: User[] = [];
+    setupMessage: MessageController = new MessageController();
+    activeMessage: MessageController = new MessageController();
+    context: Context;
+
+    lobby?: TextBasedChannel;
+    state?: State;
+
+    constructor(game: Game<Context, State>) {
         this.game = game;
+        this.context = game.createContext();
     }
 
-    play(i: BaseCommandInteraction) {
+    save(): GameSave<Context, State> {
+        return {
+            game: this.game.name,
+            players: this.players.map(p => p.id),
+            setupMessage: this.setupMessage.save(),
+            activeMessage: this.activeMessage.save(),
+            state: this.state!,
+            context: this.context,
+            lobby: this.lobby?.id,
+        }
+    }
+
+    async load(client: Client, save: GameSave<Context, State>) {
+        this.state = save.state;
+        this.context = save.context;
+
+        const setup = new MessageController();
+        const active = new MessageController();
+
+        const promises: Promise<any>[] = [
+            setup.load(client, save.setupMessage),
+            active.load(client, save.activeMessage),
+        ];
+
+        this.players = Array(save.players.length);
+        for (let i = 0; i < this.players.length; i++) {
+            promises.push(client.users.fetch(save.players[i]).then(u => this.players[i] = u));
+        }
+
+        if (save.lobby) promises.push(
+            client.channels.fetch(save.lobby).then(c => {
+                if (!c?.isText()) return;
+                this.lobby = c;
+            })
+        )
+
+        await Promise.all(promises);
+    
+        this.activeMessage = setup;
+        this.game.setup(this);
         this.resetControls();
+        this.activeMessage = active;
+        this.game.resume[this.state!](this);
+    }
+
+    start(i: BaseCommandInteraction) {
         gameInstances.push(this);
-        this.game.play(this, i).then(() => this.kill());
+        this.resetControls();
+        this.game.setup(this);
+        this.setupMessage.reply(i);
+    }
+
+    change(s: State) {
+        this.state = s;
+        this.resetControls();
+        this.game.resume[s](this);
+        this.game.change[s]?.(this);
     }
 
     kill() {
-        this.activeMessage?.endAll();
-        this.setupMessage?.endAll();
+        this.activeMessage.endAll();
+        this.setupMessage.endAll();
         gameInstances.splice(gameInstances.indexOf(this), 1);
 
         // archive created thread
@@ -60,57 +133,71 @@ export class GameInstance {
     }
 
     isMyInteraction(i: MessageComponentInteraction | ModalSubmitInteraction) {
-        return (this.activeMessage ? this.activeMessage.isMyInteraction(i) : false) ||
-               (this.setupMessage  ? this.setupMessage .isMyInteraction(i) : false);
+        return this.activeMessage.isMyInteraction(i) || this.setupMessage.isMyInteraction(i);
     }
 
-    onButton(button: string, callback: (i: ButtonInteraction) => any | undefined) {
+    onButton(button: string, callback: (i: ButtonInteraction) => Promise<State> | null) {
         this.buttons[button] = callback;
     }
 
     resolveButton(inter: ButtonInteraction) {
-        this.buttons[inter.customId]?.(inter);
+        const state = this.buttons[inter.customId]?.(inter);
+        if (state) state.then(s => this.change(s));
     }
 
-    onModal(modal: string, callback: (i: ModalSubmitInteraction) => any | undefined) {
+    onModal(modal: string, callback: (i: ModalSubmitInteraction) => Promise<State> | null) {
         this.modals[modal] = callback;
     }
 
     resolveModal(inter: ModalSubmitInteraction) {
-        this.modals[inter.customId]?.(inter);
+        const state = this.modals[inter.customId]?.(inter);
+        if (state) state.then(s => this.change(s));
     }
 
-    onSelect(button: string, callback: (i: SelectMenuInteraction) => any | undefined) {
+    onSelect(button: string, callback: (i: SelectMenuInteraction) => Promise<State> | null) {
         this.select[button] = callback;
     }
 
     resolveSelect(inter: SelectMenuInteraction) {
-        this.select[inter.customId]?.(inter);
+        const state = this.select[inter.customId]?.(inter);
+        if (state) state.then(s => this.change(s));
     }
 
     resetControls() {
         this.buttons = {};
         this.select = {};
         this.modals = {};
+        this.join = undefined;
+        this.leave = undefined;
 
         // Page flip buttons
         this.buttons["_prevpage"] = i => {
-            const p = this.activeMessage?.pages[i.channel!.id];
-            if (p) {
-                let page = p.page - 1;
-                if (page < 0) page = 0;
-                p.page = page;
-                i.update(p.pages[page]);
+            if (!this.activeMessage.pages[i.channel!.id]) this.activeMessage.pages[i.channel!.id] = { page: 0 };
+
+            const p = this.activeMessage.pages[i.channel!.id]!;
+            p.page -= 1;
+            if (p.page < 0) p.page = 0;
+
+            if (!p.pages) {
+                this.activeMessage.update(i);
+            } else {
+                i.update(p.pages[p.page]);
             }
+            return null;
         };
         this.buttons["_nextpage"] = i => {
-            const p = this.activeMessage?.pages[i.channel!.id];
-            if (p) {
-                let page = p.page + 1;
-                if (page >= p.pages.length) page = p.pages.length - 1;
-                p.page = page;
-                i.update(p.pages[page]);
+            if (!this.activeMessage.pages[i.channel!.id]) this.activeMessage.pages[i.channel!.id] = { page: 0 };
+
+            const p = this.activeMessage.pages[i.channel!.id]!;
+            p.page += 1;
+
+            if (!p.pages) {
+                this.activeMessage.update(i);
+            } else {
+                if (p.page >= p.pages.length) p.page = p.pages.length - 1;
+                i.update(p.pages[p.page]);
             }
+            return null;
         };
     }
 
@@ -120,19 +207,12 @@ export class GameInstance {
     }
 
     // easy to use messages
-
-    createMessage(message: MessageGenerator = (() => ({})), forceList: boolean = false) {
-        this.activeMessage = new MessageController(message, forceList);
-        return this.activeMessage;
-    }
-
     sendPrivate(message?: MessageGenerator): Promise<Message[]> {
         let send: (c: TextBasedChannel) => Promise<Message>;
         if (message) {
             send = c => c.send(message(c));
         } else {
             const msg = this.activeMessage;
-            if (!msg) throw new Error("Message undefined");
             send = c => msg.send(c);
         }
 
@@ -148,7 +228,6 @@ export class GameInstance {
         if (message) {
             return this.lobby.send(message(this.lobby));
         } else {
-            if (!this.activeMessage) throw new Error("Message undefined");
             return this.activeMessage.send(this.lobby);
         }
     }
@@ -162,10 +241,9 @@ export class GameInstance {
 
     // easy to use inputs
 
-    addFlagsInput(label: string, flags: string[], values: boolean[], onChange?: (index: number, value: boolean) => any) {
+    addFlagsInput(label: string, flags: string[], values: boolean[], onChange?: (index: number, value: boolean) => Promise<State> | null) {
         // Add buttons
         const msg = this.activeMessage;
-        if (!msg) throw new Error("Message undefined");
 
         const old = msg.message;
         msg.message = (channel, prev) => {
@@ -198,15 +276,15 @@ export class GameInstance {
         flags.forEach((_, index) => {
             this.onButton(`_${label}_${index}`, i => {
                 values[index] = !values[index];
-                onChange?.(index, values[index]);
+                const ret = onChange?.(index, values[index]) ?? null;
                 msg.updateAll(i);
+                return ret;
             });
         });
     }
 
-    addNumberInput(label: string, min: number, def: number, max: number, onChange?: (value: number) => any) {
+    addNumberInput(label: string, min: number, def: number, max: number, onChange?: (value: number) => Promise<State> | null) {
         const msg = this.activeMessage;
-        if (!msg) throw new Error("Message undefined");
 
         let value = def;
 
@@ -249,18 +327,21 @@ export class GameInstance {
         // Add button logic
         this.onButton(`_${label}_def`, i => {
             value = def;
-            onChange?.(value);
+            const ret = onChange?.(value) ?? null;
             msg.updateAll(i);
+            return ret;
         });
         this.onButton(`_${label}_dec`, i => {
             if (value > min) value -= 1;
-            onChange?.(value);
+            const ret = onChange?.(value) ?? null;
             msg.updateAll(i);
+            return ret;
         });
         this.onButton(`_${label}_inc`, i => {
             if (value < max) value += 1;
-            onChange?.(value);
+            const ret = onChange?.(value) ?? null;
             msg.updateAll(i);
+            return ret;
         });
     }
     
@@ -275,15 +356,14 @@ export class GameInstance {
 
             if (this.players.indexOf(i.user) >= 0) {
                 i.reply({ content: "You've already joined!", ephemeral: true });
-                return;
+                return null;
             }
             if (this.players.length >= max) {
                 i.reply({ content: "Game is already full!", ephemeral: true });
-                return;
+                return null;
             }
     
-            this.players.push(i.user);
-            this.join?.(i, i.user);
+            return this.join?.(i, i.user) ?? null;
         });
     }
 
@@ -292,18 +372,16 @@ export class GameInstance {
             const index = this.players.indexOf(i.user);
             if (index === -1) {
                 i.reply({ content: "You haven't even joined!", ephemeral: true });
-                return;
+                return null;
             }
     
-            this.players.splice(index, 1);
-            this.leave?.(i, i.user, index);
+            return this.leave?.(i, i.user, index) ?? null;
         });
     }
 
     addLeaveButton(addRow = true) {
         // Add button
         const msg = this.activeMessage;
-        if (!msg) throw new Error("Message undefined");
 
         const old = msg.message;
         msg.message = (channel, prev) => {
@@ -331,16 +409,10 @@ export class GameInstance {
             }
             return m;
         };
-        
-        // Add button logic
-        this.addLeaveLogic();
     }
     
-    setSetupMessage(start: (i: ButtonInteraction) => void) {
+    setSetupMessage(start: (i: ButtonInteraction) => Promise<State> | null) {
         const msg = this.activeMessage;
-        if (!msg) throw new Error("Message undefined");
-
-        this.setupMessage = msg;
 
         // Add buttons
         const old = msg.message;
@@ -386,15 +458,18 @@ export class GameInstance {
             
             if (this.players.length < min) {
                 i.reply({ content: "Not enough players!", ephemeral: true });
-                return;
+                return null;
             }
             if (this.players.length > max) {
                 i.reply({ content: "Too many players!", ephemeral: true });
-                return;
+                return null;
             }
 
-            start(i);
+            return start(i);
         });
+
+        this.setupMessage = msg;
+        this.activeMessage = new MessageController();
     }
 
 }

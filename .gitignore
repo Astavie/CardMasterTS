@@ -4,3 +4,4 @@ build/
 package-lock.json
 db.json
 src/game/cah/packs/eppgroep.ts
+db/

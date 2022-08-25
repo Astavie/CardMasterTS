@@ -16,10 +16,10 @@ export function fillPlayers(card: string, players: User[]) {
     );
 }
 
-export function fillBlanks(card: string, blanks: (string | undefined)[]) {
+export function fillBlanks(card: string, blanks: (string | null)[]) {
     return card.replaceAll("\\_", () => {
         let card = blanks.shift();
-        if (card === undefined) return "\\_";
+        if (!card) return "\\_";
 
         // rules to make the blank fit the sentence
         // final punctuation gets removed
@@ -39,7 +39,7 @@ export function escapeDiscord(s: string) {
     return s.replace(/[\\_*[\]<>()|~`]/g, '\\$&');
 }
 
-export function fillModal(prompt: string, customId: string = "fill_modal") {
+export function fillModal(prompt: string, i: MessageComponentInteraction, customId: string = "fill_modal") {
     const split = prompt.replace(/\\(.)/g, "$1").split('_'); // remove escaping backslashes
 
     for (let i = 0; i < split.length - 1; i++) {
@@ -71,20 +71,18 @@ export function fillModal(prompt: string, customId: string = "fill_modal") {
         }
     }
 
-    return (i: MessageComponentInteraction) => {
-        i.showModal({
-            customId,
-            title: "Fill in the blanks",
-            components: split.map((s, i) => ({
-                type: "ACTION_ROW",
-                components: [{
-                    type: "TEXT_INPUT",
-                    customId: `blank_${i}`,
-                    style: "SHORT",
-                    label: s
-                }]
-            }))
-        });
-    };
+    i.showModal({
+        customId,
+        title: "Fill in the blanks",
+        components: split.map((s, i) => ({
+            type: "ACTION_ROW",
+            components: [{
+                type: "TEXT_INPUT",
+                customId: `blank_${i}`,
+                style: "SHORT",
+                label: s
+            }]
+        }))
+    });
 }
 

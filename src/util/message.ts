@@ -1,4 +1,4 @@
-import { BaseCommandInteraction, EmbedFieldData, Message, MessageActionRowOptions, MessageComponentInteraction, MessageEmbedOptions, ModalSubmitInteraction, Snowflake, TextBasedChannel } from "discord.js";
+import { BaseCommandInteraction, Client, EmbedFieldData, Message, MessageActionRowOptions, MessageComponentInteraction, MessageEmbedOptions, ModalSubmitInteraction, Snowflake, TextBasedChannel } from "discord.js";
 
 export type MessageOptions = {
     content?: string;
@@ -91,7 +91,7 @@ function prepareMessage(msg: MessageOptions, page: number = 0, forceList: boolea
 
     const addButtons = (cur: MessageOptions, i: number) => {
         // Add next page and prev page buttons
-        cur.components = cur.components ? [ ...cur.components ] : [{
+        cur.components = cur.components?.length ? [ ...cur.components ] : [{
             type: "ACTION_ROW",
             components: [],
         }];
@@ -155,17 +155,24 @@ function disableButtons(m: MessageOptions, ...exceptions: string[]): MessageOpti
     return m;
 }
 
+export type MessageSave = {
+    forceList: boolean,
+    disableButtons?: string[],
+
+    messages: {[key: Snowflake]: Snowflake};
+    pages: {[key: Snowflake]: number};
+}
+
 export class MessageController {
 
     message: MessageGenerator;
-    consumers: MessageConsumer[] = [];
-
     forceList: boolean = false;
+    disableButtons?: string[];
 
     messages: {[key: Snowflake]: Message} = {};
     pages: {[key: Snowflake]: {
         page: number,
-        pages: MessageOptions[],
+        pages?: MessageOptions[],
     }} = {};
 
     constructor(message: MessageGenerator = (() => ({})), forceList: boolean = false) {
@@ -173,15 +180,46 @@ export class MessageController {
         this.forceList = forceList;
     }
 
-    async sendMessage(channel: TextBasedChannel, sender: MessageSender, prev?: Message, transformer: (m: MessageOptions) => MessageOptions = m => m) {
+    save(): MessageSave {
+        return {
+            forceList: this.forceList,
+            disableButtons: this.disableButtons,
+            messages: Object.fromEntries(Object.entries(this.messages).map(([k, v]) => [k, v.id])),
+            pages: Object.fromEntries(Object.entries(this.pages).filter(([k, v]) => v.page > 0).map(([k, v]) => [k, v.page])),
+        };
+    }
+
+    load(client: Client, save: MessageSave) {
+        this.forceList = save.forceList;
+        this.disableButtons = save.disableButtons;
+        this.pages = Object.fromEntries(Object.entries(save.pages).map(([k, v]) => [k, { page: v }]));
+
+        const promises: Promise<any>[] = [];
+
+        for (const [k, v] of Object.entries(save.messages)) {
+            promises.push(client.channels.fetch(k).then(c => {
+                if (!c?.isText()) return;
+                return c.messages.fetch(v).then(m => {
+                    this.messages[k] = m;
+                });
+            }));
+        }
+
+        return Promise.all(promises);
+    }
+
+    async sendMessage(channel: TextBasedChannel, sender: MessageSender, prev?: Message, disableAllButtons = false) {
         const page = prev ? this.pages[prev.channel.id]?.page ?? 0 : 0;
+
+        let transformer = this.disableButtons ? (o: MessageOptions) => disableButtons(o, ...this.disableButtons!) : undefined;
+        if (disableAllButtons) transformer = disableButtons;
+
         const [cur, pages] = prepareMessage(this.message(channel, prev), page, this.forceList, transformer);
         
         const msg = await sender(cur);
 
         if (!prev) {
             this.messages[msg.channel.id] = msg;
-            this.consumers.forEach(c => c(msg));
         }
 
         if (pages) {
@@ -227,13 +265,13 @@ export class MessageController {
         if (!i.channel || !i.message) throw new Error("Unknown message");
         delete this.messages[i.channel.id];
         delete this.pages[i.channel.id];
-        return this.sendMessage(i.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, i.message as Message, disableButtons);
+        return this.sendMessage(i.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, i.message as Message, true);
     }
 
     endMessage(msg: Message) {
         delete this.messages[msg.channel.id];
         delete this.pages[msg.channel.id];
-        return this.sendMessage(msg.channel, (o => msg.edit(o)), msg, disableButtons);
+        return this.sendMessage(msg.channel, (o => msg.edit(o)), msg, true);
     }
 
     endAll(i?: MessageComponentInteraction | ModalSubmitInteraction) {
@@ -241,9 +279,9 @@ export class MessageController {
 
         for (const msg of Object.values(this.messages)) {
             if (i && i.message === msg) {
-                promises.push(this.sendMessage(msg.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, msg, disableButtons));
+                promises.push(this.sendMessage(msg.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, msg, true));
             } else {
-                promises.push(this.sendMessage(msg.channel, (o => msg.edit(o)), msg, disableButtons));
+                promises.push(this.sendMessage(msg.channel, (o => msg.edit(o)), msg, true));
             }
         }
 
@@ -251,11 +289,6 @@ export class MessageController {
         this.pages = {};
 
         return Promise.all(promises);
-    }
-
-    disableButtons(i: MessageComponentInteraction | ModalSubmitInteraction, ...exceptions: string[]) {
-        if (!i.channel) throw new Error("Unknown channel");
-        return this.sendMessage(i.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, i.message as Message, m => disableButtons(m, ...exceptions));
     }
 
     isMyInteraction(i: MessageComponentInteraction | ModalSubmitInteraction) {

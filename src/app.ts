@@ -4,14 +4,33 @@ config();
 
 // Require the necessary discord.js classes
 import { Client, Intents } from 'discord.js';
-import { GameInstance, gameInstances, games } from "./game/game";
+import { GameInstance, gameInstances, games, GameSave } from "./game/game";
+import Nedb = require("nedb");
 
 // Create a new client instance
 const client = new Client({ intents: [Intents.FLAGS.GUILDS] });
 
+// Create db
+const db = new Nedb({ filename: "db/games", autoload: true });
+
 // When the client is ready, run this code (only once)
-client.once('ready', () => {
-    console.log('Ready!');
+client.once('ready', async () => {
+    db.find({}, (_: any, docs: GameSave<any, any>[]) => {
+        for (const save of docs) {
+            const game = games[save.game];
+            const instance = new GameInstance(game);
+            instance.load(client, save).then(() => {
+                gameInstances.push(instance);
+                console.log(`Loaded ${save.game} game`);
+            });
+        }
+
+        console.log('Ready!');
+    })
+});
+
+client.on('error', e => {
+    console.error(e);
 });
 
 // On commands
@@ -72,7 +91,7 @@ client.on('interactionCreate', async interaction => {
                 return;
             }
 
-            new GameInstance(newGame).play(interaction);
+            new GameInstance(newGame).start(interaction);
             return;
         case "stop":
             if (!interaction.channel) {
@@ -106,3 +125,20 @@ client.on('interactionCreate', async interaction => {
 
 // Login to Discord with your client's token
 client.login(process.env.TOKEN);
+
+process.on("exit", () => {
+    db.remove({}, () => {
+        db.insert(gameInstances.map(g => g.save()), () => {
+            console.log("Saved games");
+        });
+    });
+});
+
+process.on('SIGINT', () => {
+    db.remove({}, () => {
+        db.insert(gameInstances.map(g => g.save()), () => {
+            console.log("Saved games");
+            process.exit();
+        });
+    });
+});
