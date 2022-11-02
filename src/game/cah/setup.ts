@@ -1,88 +1,188 @@
-import { Message } from "discord.js";
-import { GameInstance, shuffle } from "../game";
-import { CAH, CAHContext, CAHState, getPlayerList, packs, randoId } from "./cah";
-import { setupHAND } from "./hand";
+import { countBlanks, escapeDiscord, shuffle } from '../../util/card';
+import { Game, ReturnOf, UserInteraction } from '../logic';
+import { SetupLogic } from '../setup';
+import { Card, GameContext, getBlackCard, getWhiteCard, Pack, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
+import { basePack, fullPack } from './packs/cahstandard';
 
-export function setup(game: GameInstance<CAHContext, CAHState>) {
-    const packsPicked = packs.map((_p, i) => i === 0);
+// Global packs
+export const packs: Pack[] = [
+    escapePack({ name: "CAH Base", cards: basePack }),
+    escapePack({ name: "CAH Full", cards: fullPack }),
+];
 
-    game.activeMessage.message = () => ({
-        embeds: [{
-            color: CAH.color,
-            title: CAH.name,
-            fields: [{
-                name: "Players",
-                value: getPlayerList(game.players, game.context.flags[0])
-            }]
-        }]
-    });
-
-    game.join = (i, player) => {
-        game.players.push(player);
-        game.context.players[player.id] = {
-            hand: [],
-            playing: [],
-            points: 0,
-            hidden: false,
-        };
-        game.setupMessage.updateAll(i);
-        return null;
-    };
-    game.leave = (i, player, index) => {
-        game.players.splice(index, 1);
-        delete game.context.players[player.id];
-        game.setupMessage.updateAll(i);
-        return null;
-    };
-    game.minPlayers = () => 2;
-    game.maxPlayers = () => 20;
-    
-    game.addFlagsInput("Packs", packs.map(p => p.name), packsPicked);
-    game.addFlagsInput("Rules", ["Rando Cardrissian", "Quiplash Mode"], game.context.flags);
-    game.addNumberInput("Points", 1, 8, Number.MAX_SAFE_INTEGER, value => {game.context.maxPoints = value; return null;});
-    game.addNumberInput("Cards", 5, 10, 20, value => {game.context.handCards = value; return null;});
-    game.setSetupMessage(i => {
-        if (!i.message) return null;
-
-        // START
-        game.context.whiteDeck = [];
-        game.context.blackDeck = [];
-
-        let widx = 0;
-        let bidx = 0;
-
-        for (let i = 0; i < packs.length; i++) {
-            if (packsPicked[i]) {
-                game.context.packs.push(i);
-                for (const _ of packs[i].cards.white) game.context.whiteDeck.push(widx++);
-                for (const _ of packs[i].cards.black) game.context.blackDeck.push(bidx++);
-            }
-        }
-
-        if (game.context.blackDeck.length === 0) {
-            i.reply({ ephemeral: true, content: "There are no black cards in the selected packs." });
-            return null;
-        }
-
-        if (game.context.whiteDeck.length < (game.context.flags[1] ? 0 : game.players.length * game.context.handCards) + (game.context.flags[0] ? 1 : 0)) {
-            i.reply({ ephemeral: true, content: "There aren't enough white cards in the selected packs to give everyone a full hand." });
-            return null;
-        }
-
-        shuffle(game.context.whiteDeck);
-        shuffle(game.context.blackDeck);
-
-        if (game.context.flags[0]) {
-            game.context.players[randoId] = {
-                hand: [],
-                playing: [],
-                points: 0,
-                hidden: false,
-            }
-        }
-
-        game.setupMessage.disableButtons = ["_join", "_leave"];
-        game.setupMessage.updateAll(i);
-        return game.startLobby(i.message as Message).then(() => setupHAND(game));
-    });
+// Packs inside .gitignore
+function conditionalRequire(name: string): any {
+    try {
+        return require(name);
+    } catch {}
+    return undefined;
 }
+
+const eppgroep = conditionalRequire("./packs/eppgroep")?.eppgroep;
+
+if (eppgroep) {
+    const epack = escapePack({
+        name: "EPPGroep",
+        cards: eppgroep,
+    });
+    packs.push(epack);
+    packs.push(epack);
+}
+
+function escapePack(p: Pack) {
+    p.cards.white = p.cards.white.map(escapeDiscord);
+    p.cards.black = p.cards.black.map(escapeDiscord);
+    return p;
+}
+
+export const setupLogic = new SetupLogic([{
+    type: 'choice',
+    name: 'Packs',
+    values: packs.map(pack => ({ label: pack.name })),
+    default: [0],
+    min: 1,
+    max: Number.MAX_SAFE_INTEGER,
+},{
+    type: 'flags',
+    name: 'Rules',
+    values: ['Rando Cardrissian', 'Quiplash Mode'],
+    default: [true, false],
+},{
+    type: 'number',
+    name: 'Max points',
+    min: 1,
+    max: Number.MAX_SAFE_INTEGER,
+    default: 9,
+},{
+    type: 'number',
+    name: 'Hand cards',
+    min: 1,
+    max: 20,
+    default: 10,
+}] as const, (ctx, game) => {
+    const players: string[] = game.players.map(player => player.toString());
+    if (ctx['Rules'][0]) players.unshift('`Rando Cardrissian`');
+    return { fields: [{
+        name: 'Players',
+        value: players.join('\n') || '*None.*',
+    }]};
+});
+
+export type SetupContext = ReturnOf<typeof setupLogic>;
+
+export async function startGame(_: unknown, game: Game, setup: SetupContext, i?: UserInteraction): Promise<GameContext | null> {
+    if (game.players.length < 2) {
+        i!.reply({
+            content: 'You need at least two players to start.',
+            ephemeral: true
+        });
+    }
+
+    const whiteDeck: UnrealizedCard[] = [];
+    const blackDeck: UnrealizedCard[] = [];
+
+    for (const pack of setup['Packs']) {
+        for (let i = 0; i < packs[pack].cards.white.length; i++)
+            whiteDeck.push([pack, i]);
+        for (let i = 0; i < packs[pack].cards.black.length; i++)
+            blackDeck.push([pack, i]);
+    }
+
+    shuffle(whiteDeck);
+    shuffle(blackDeck);
+
+    const blackCard = blackDeck.pop();
+    if (!blackCard) {
+        i!.reply({
+            content: 'The selected packs do not contain any black cards.',
+            ephemeral: true
+        });
+        return null;
+    }
+
+    const prompt = realizeBlackCard(blackCard, game.players);
+    const blanks = countBlanks(getBlackCard(prompt));
+
+    let totalCards = setup['Hand cards'] * game.players.length;
+    if (setup['Rules'][0]) totalCards += blanks;
+
+    if (whiteDeck.length < totalCards) {
+        i!.reply({
+            content: 'There are not enough white cards in the selected packs to start the game.',
+            ephemeral: true
+        });
+        return null;
+    }
+
+    // LET'S GO
+    game.closeLobby(i, ['_join', '_leave']);
+    await game.allowSpectators();
+
+    // rando's cards
+    const points = Object.fromEntries(game.players.map(player => [player.id, 0]))
+    let randoPlaying: Card[] | null = null;
+    if (setup['Rules'][0]) {
+        points[randoId] = 0;
+        randoPlaying = [];
+        while (randoPlaying.length < blanks) {
+            const card = whiteDeck.pop()!;
+            randoPlaying.push(realizeWhiteCard(card, game.players));
+        }
+    }
+
+    let ctx: RoundContext;
+    if (setup['Rules'][1]) {
+        const playing: {[key:string]:string[]|null} = Object.fromEntries(game.players.map(player => [player, null]));
+        delete playing[game.players[0].id];
+        if (randoPlaying) {
+            playing[randoId] = randoPlaying.map(getWhiteCard);
+        }
+        ctx = {
+            quiplash: true,
+            maxPoints: setup['Max points'],
+            czar: 0,
+            points,
+            playing,
+            whiteDeck,
+            blackDeck,
+            prompt,
+            shuffle: [],
+        };
+    } else {
+        const hand: {[key:string]:Card[]} = {}
+        for (const player of game.players) {
+            const phand: Card[] = [];
+            hand[player.id] = phand;
+
+            while (phand.length < setup['Hand cards']) {
+                const card = whiteDeck.pop()!;
+                phand.push(realizeWhiteCard(card, game.players));
+            }
+        }
+        const playing = Object.fromEntries(game.players.map(player => [player.id, Array(blanks).fill(null)]));
+        delete playing[game.players[0].id];
+        if (randoPlaying) {
+            hand[randoId] = randoPlaying;
+            playing[randoId] = [...Array(blanks).keys()];
+        }
+        ctx = {
+            quiplash: false,
+            handCards: setup['Hand cards'],
+            maxPoints: setup['Max points'],
+            czar: 0,
+            points,
+            playing,
+            whiteDeck,
+            blackDeck,
+            prompt,
+            shuffle: [],
+            hand,
+        };
+    }
+
+    return {
+        state: 'hand',
+        context: ctx,
+    };
+}
+

@@ -1,132 +1,100 @@
-import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowComponentResolvable, MessageActionRowOptions } from "discord.js";
-import { bolden, fillBlanks } from "../../util/card";
-import { GameInstance, shuffle } from "../game";
-import { addPlayer, CAH, CAHContext, CAHState, getPointsList, randoId, removePlayer } from "./cah";
-import { setupHAND } from "./hand";
+import { MessageActionRowOptions, User } from 'discord.js';
+import { bolden, fillBlanks } from '../../util/card';
+import { createButtonGrid, MessageOptions } from '../../util/message';
+import { Game, Logic } from '../logic';
+import { getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
 
-export function displayREAD(game: GameInstance<CAHContext, CAHState>) {
-    // Shuffle players
-    game.context.shuffle = game.players.filter((p, index) => game.context.czar !== index && !game.context.players[p.id].playing.includes(null)).map(p => p.id);
-    if (game.context.flags[0]) game.context.shuffle.push(randoId);
-    shuffle(game.context.shuffle);
+function message(ctx: RoundContext, game: Game, player: User | null): MessageOptions {
+    const prompt = getBlackCard(ctx.prompt);
 
-    game.activeMessage.updateAll();
-    game.sendPrivate();
-}
-
-export function resumeREAD(game: GameInstance<CAHContext, CAHState>) {
-    // Display
-    let prompt = `> ${game.context.prompt!}`
-    prompt = `Card Czar: <@${game.players[game.context.czar].id}>\n\n` + prompt;
-
-    game.activeMessage.message = channel => {
-        let message = prompt;
-
-        let answers = game.context.shuffle.map((p, i) => {
-            const player = game.context.players[p];
-            let answer = game.context.prompt as string;
-    
-            if (answer.indexOf("_") === -1) {
-                answer = bolden(player.playing.map(c => typeof c !== 'number' ? c : player.hand[c]).join(" "));
-            } else {
-                answer = fillBlanks(answer, player.playing.map(i => typeof i !== 'number' ? i : player.hand[i]));
-            }
-    
-            return `\`${i + 1}.\` ${answer}`;
-        }).join("\n");
-
-        message += "\n\n" + answers;
-
-        let components: (Required<BaseMessageComponentOptions> & MessageActionRowOptions)[] = [];
-
-        if (channel.type === "DM" && game.players[game.context.czar] === channel.recipient) {
-            let answer = 0;
-            while (answer < game.context.shuffle.length) {
-                const row: MessageActionRowComponentResolvable[] = [];
-                for (let i = 0; i < 5; i++) {
-                    row.push({
-                        type: "BUTTON",
-                        style: "PRIMARY",
-                        label: (answer + 1).toString(),
-                        customId: `answer_${answer}`,
-                    });
-
-                    answer++;
-                    if (answer >= game.context.shuffle.length) break;
-                }
-                components.push({
-                    type: "ACTION_ROW",
-                    components: row
-                });
-            }
+    const answers = ctx.shuffle.map((p, i) => {
+        let answers: string[];
+        if (ctx.quiplash) {
+            answers = ctx.playing[p] as string[];
+        } else {
+            answers = ctx.playing[p].map(i => getWhiteCard(ctx.hand[p][i!]));
         }
 
-        const fields: EmbedFieldData[] = [{
-            name: "Prompt",
-            value: message
-        }];
-
-        return {
-            embeds: [{
-                color: CAH.color,
-                title: CAH.name,
-                fields: fields
-            }],
-            components: components
+        let answer = prompt;
+        if (answer.indexOf("_") === -1) {
+            answer = bolden(answers.join(' '));
+        } else {
+            answer = fillBlanks(answer, answers);
         }
-    };
 
-    for (let index = 0; index < game.players.length + (game.context.flags[0] ? 1 : 0); index++) {
-        game.onButton(`answer_${index}`, (i): Promise<CAHState> | null => {
-            // Get winner
-            const winner = game.context.players[game.context.shuffle[index]];
-            let answer = game.context.prompt as string;
+        return `\`${i + 1}.\` ${answer}`;
+    }).join('\n');
+
+    const message = `Card Czar: ${game.players[ctx.czar]}\n\n> ${getBlackCard(ctx.prompt)}\n\n${answers}`;
     
-            if (answer.indexOf("_") === -1) {
-                const bold = bolden(winner.playing.map(c => typeof c !== 'number' ? c : winner.hand[c]).join(" "));
-                answer = "> " + answer + "\n> " + bold;
-            } else {
-                answer = "> " + fillBlanks(answer, winner.playing.map(i => typeof i !== 'number' ? i : winner.hand[i]));
-            }
-            
-            winner.points += 1;
-
-            // Send messages
-            game.activeMessage.endAll(i);
-            game.resetControls();
-
-            return game.sendAll(() => ({
-                embeds: [{
-                    color: CAH.color,
-                    fields: [{
-                        name: 'Round Winner',
-                        value: `${game.context.shuffle[index] === randoId ? "`Rando Cardrissian`" : `<@${game.context.shuffle[index]}>`}\n${answer}`
-                    },{
-                        name: 'Points',
-                        value: getPointsList(game.players, game.context.flags[0], game.context.players, game.context.maxPoints)
-                    }]
-                }]
-            })).then(() => {
-                // Remove played cards
-                for (const player of Object.values(game.context.players)) {
-                    player.hand = player.hand.filter((_, i) => !player.playing.includes(i));
-                }
-
-                // Check points
-                if (winner.points >= game.context.maxPoints) {
-                    return "END";
-                } else {
-                    return setupHAND(game);
-                }
-            });
+    const components: (Required<MessageActionRowOptions>)[] = [];
+    if (game.players[ctx.czar] === player) {
+        components.push(...createButtonGrid(ctx.shuffle.length, i => ({
+            style: 'PRIMARY',
+            label: (i + 1).toString(),
+            customId: `answer_${i}`,
+        })));
+    }
+    if (player) {
+        components.push({
+            type: 'ACTION_ROW',
+            components: [{
+                type: 'BUTTON',
+                customId: '_leave',
+                style: 'DANGER',
+                label: 'Leave',
+            }]
         });
     }
 
-    // Join and leave logic
-    game.join = (i, player) => addPlayer(i, game, player);
-    game.leave = (i, player, index) => removePlayer(i, game, player, index);
-    game.minPlayers = () => 2;
-    game.maxPlayers = () => 20;
-    game.addLeaveButton();
-    game.addSupportedLogic();
+    return {
+        embeds: [{ fields: [{
+            name: 'Prompt',
+            value: message,
+        }]}],
+        components,
+        forceList: true,
+    };
+}
+
+export const readLogic: Logic<void, RoundContext> = {
+    onEnter(ctx, game) {
+        game.updateMessage(p => message(ctx, game, p));
+    },
+    onExit(_ctx, game) {
+        game.closeMessage();
+    },
+    onInteraction(ctx, game, resolve, i) {
+        if (i.customId === '_join' || i.customId === '_leave') {
+            if (!i.replied) {
+                game.updateMessage(p => message(ctx, game, p), i);
+            }
+            return;
+        }
+
+        if (i.customId.startsWith('answer_')) {
+            const prompt = getBlackCard(ctx.prompt);
+            const winner = ctx.shuffle[parseInt(i.customId.substring(7))];
+        
+            let answers: string[];
+            if (ctx.quiplash) {
+                answers = ctx.playing[winner] as string[];
+            } else {
+                answers = ctx.playing[winner].map(i => getWhiteCard(ctx.hand[winner][i!]));
+            }
+
+            const answer = fillBlanks(prompt, answers);
+            ctx.points[winner] += 1;
+
+            // Send winner
+            game.sendAll({ embeds: [{ fields: [{
+                name: 'Round Winner',
+                value: `${winner === randoId ? '`Rando Cardrissian`' : `<@${winner}>`}\n${answer}`,
+            },{
+                name: 'Points',
+                value: getPointsList(game.players, ctx.points, ctx.maxPoints),
+            }]}]});
+            game.closeMessage(undefined, i).then(resolve);
+        }
+    },
 }

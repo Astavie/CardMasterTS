@@ -1,16 +1,54 @@
-import { BaseCommandInteraction, Client, EmbedFieldData, Message, MessageActionRowOptions, MessageComponentInteraction, MessageEmbedOptions, ModalSubmitInteraction, Snowflake, TextBasedChannel } from "discord.js";
+import { BaseCommandInteraction, ButtonInteraction, Client, EmbedFieldData, Message, MessageActionRowComponentResolvable, MessageActionRowOptions, MessageButtonOptions, MessageComponentInteraction, MessageEmbedOptions, ModalSubmitInteraction, Snowflake, TextBasedChannel } from "discord.js"
+import { Serializable } from "./saving";
 
 export type MessageOptions = {
-    content?: string;
-    embeds?: MessageEmbedOptions[];
-    components?: (Required<MessageActionRowOptions>)[];
+    embeds: MessageEmbedOptions[];
+    components: (Required<MessageActionRowOptions>)[];
+    forceList: boolean;
 }
 
-export type MessageGenerator = (channel: TextBasedChannel, prev?: Message) => MessageOptions;
+export function createButtonGrid(length: number, generator: (i: number) => MessageButtonOptions): (Required<MessageActionRowOptions>)[] {
+    const rows: (Required<MessageActionRowOptions>)[] = [];
+    let i = 0;
+    while (i < length) {
+        const row: MessageActionRowComponentResolvable[] = [];
+        for (let j = 0; j < 5; j++) {
+            row.push({
+                type: 'BUTTON',
+                ...generator(i),
+            });
+            i++;
+            if (i >= length) break;
+        }
+        rows.push({
+            type: 'ACTION_ROW',
+            components: row,
+        });
+    }
+    return rows;
+}
 
-export type MessageConsumer = (message: Message) => any;
+export function disableButtons(m: (Required<MessageActionRowOptions>)[], exceptions?: string[]): (Required<MessageActionRowOptions>)[] {
+    const newRows: (Required<MessageActionRowOptions>)[] = [];
 
-export type MessageSender = (msg: MessageOptions) => Promise<Message>;
+    for (const row of m) {
+        const newRow: MessageActionRowComponentResolvable[] = [];
+
+        for (const comp of row.components) {
+            if (!comp.disabled && (!exceptions || !exceptions.includes((comp as any).customId))) {
+                newRow.push({ ...comp, disabled: true } as MessageActionRowComponentResolvable);
+            } else {
+                newRow.push(comp);
+            }
+        }
+
+        newRows.push({
+            type: 'ACTION_ROW',
+            components: newRow,
+        });
+    }
+    return newRows;
+}
 
 // there are up to:
 // - 6000 characters for all embeds
@@ -21,9 +59,7 @@ const fieldLimit = 1024;
 const embedLimit = 2048; // lower threshold since 6000 characters are still too much
 const embedFieldLimit = 25;
 
-function prepareMessage(msg: MessageOptions, page: number = 0, forceList: boolean = false, transformer: (o: MessageOptions) => MessageOptions = o => o): [MessageOptions, MessageOptions[] | null] {
-    if (!msg.embeds) return [msg, null];
-
+function prepareMessage(msg: MessageOptions): MessageEmbedOptions[] {
     const embeds: MessageEmbedOptions[] = [];
 
     for (const embed of msg.embeds) {
@@ -38,19 +74,24 @@ function prepareMessage(msg: MessageOptions, page: number = 0, forceList: boolea
 
         for (let field of embed.fields) {
             while (field.value.length > fieldLimit) {
-                // Get as many lines under the 1024 limit
-                const split = field.value.split("\n");
-                let first = split.shift() as string;
-                while (split.length && first.length + split[0].length + 1 <= fieldLimit) {
-                    first += "\n" + split.shift();
+                // Split field on newline
+                let split = field.value.lastIndexOf('\n', fieldLimit);
+                if (split === -1) {
+                    split = field.value.lastIndexOf(' ', fieldLimit);
+                    if (split === -1) {
+                        split = fieldLimit;
+                    }
                 }
 
-                // Create first field
-                field.value = first;
+                const fst = field.value.substring(0, split);
+                const snd = field.value.substring(split).trimStart();
+
+                // Create intermediary field
+                field.value = fst;
                 fields.push(field);
 
                 // Continue
-                field = { name: ".", value: split.join("\n") };
+                field = { name: ".", value: snd };
             }
 
             // Push last field
@@ -60,16 +101,20 @@ function prepareMessage(msg: MessageOptions, page: number = 0, forceList: boolea
         // put as many fields in the embed as possible
         while (fields.length) {
             const first: EmbedFieldData[] = [];
-            let chars =
+            let chars = 
                 (embed.title?.length ?? 0) +
                 (embed.description?.length ?? 0) +
                 (embed.footer?.text?.length ?? 0) +
                 (embed.author?.name?.length ?? 0) +
-                ("\nPage 99/99".length)
+                ('\nPage 99/99'.length);
 
-            while (fields.length && first.length + 1 <= embedFieldLimit && chars + fields[0].name.length + fields[0].value.length <= embedLimit) {
+            while (
+                fields.length &&
+                first.length + 1 <= embedFieldLimit &&
+                chars + fields[0].name.length + fields[0].value.length <= embedLimit
+            ) {
                 chars += fields[0].name.length + fields[0].value.length;
-                first.push(fields.shift() as EmbedFieldData);
+                first.push(fields.shift()!);
             }
 
             embeds.push({
@@ -84,216 +129,148 @@ function prepareMessage(msg: MessageOptions, page: number = 0, forceList: boolea
         for (let i = 0; i < embeds.length; i++) {
             const embed = embeds[i];
             embed.footer ??= {};
-            embed.footer.text ??= "";
+            embed.footer.text ??= '';
             embed.footer.text += `\nPage ${i + 1}/${embeds.length}`;
         }
     }
 
-    const addButtons = (cur: MessageOptions, i: number) => {
-        // Add next page and prev page buttons
-        cur.components = cur.components?.length ? [ ...cur.components ] : [{
-            type: "ACTION_ROW",
-            components: [],
-        }];
-        const row = { ...cur.components[cur.components.length - 1] };
-        cur.components[cur.components.length - 1] = row;
-
-        row.components = [
-            ...row.components,
-            {
-                type: "BUTTON",
-                style: "PRIMARY",
-                label: "◀",
-                customId: `_prevpage`,
-                disabled: i === 0,
-            }, {
-                type: "BUTTON",
-                style: "PRIMARY",
-                label: "▶",
-                customId: `_nextpage`,
-                disabled: i + 1 >= embeds.length,
-            }
-        ];
-        return cur;
-    }
-
-    // Create list of MessageOptions
-    let list: MessageOptions[] | null = null;
-    if (embeds.length > 1 || forceList) {
-        list = [];
-        for (let i = 0; i < embeds.length; i++) {
-            const cur = { ...msg, embeds: [embeds[i]] };
-            list.push(transformer(addButtons(cur, i)));
-        }
-    }
-
-    // Get return value
-    let ret: MessageOptions = { ...msg };
-    if (page >= embeds.length) {
-        ret.embeds = [{ footer: { text: `Page ${page + 1}/${embeds.length}` } }];
-        addButtons(ret, page);
-        ret = transformer(ret);
-    } else if (list) {
-        ret = list[page];
-    } else {
-        ret.embeds = [embeds[page]];
-        ret = transformer(ret);
-    }
-
-    return [ret, list];
+    return embeds;
 }
 
-function disableButtons(m: MessageOptions, ...exceptions: string[]): MessageOptions {
-    if (!m.components) return m;
-    for (const row of m.components) {
-        for (const comp of row.components) {
-            if (!(comp as any).customId || !exceptions.includes((comp as any).customId)) {
-                comp.disabled = true;
-            }
-        }
-    }
-    return m;
+function addPageButtons(components: (Required<MessageActionRowOptions>)[], page: number, max: number): (Required<MessageActionRowOptions>)[] {
+    components = components.length ? [ ...components ] : [{
+        type: "ACTION_ROW",
+        components: [],
+    }];
+    const row = { ...components[components.length - 1] };
+    components[components.length - 1] = row;
+
+    row.components.push({
+        type: "BUTTON",
+        style: "PRIMARY",
+        label: "◀",
+        customId: `_prevpage`,
+        disabled: page === 0,
+    }, {
+        type: "BUTTON",
+        style: "PRIMARY",
+        label: "▶",
+        customId: `_nextpage`,
+        disabled: page + 1 >= max,
+    });
+
+    return components;
 }
 
-export type MessageSave = {
-    forceList: boolean,
-    disableButtons?: string[],
+export type MessageSave = {[key: Snowflake]: {
+    msg: Snowflake,
+    cache?: MessageEmbedOptions[],
+    page?: number,
+}};
 
-    messages: {[key: Snowflake]: Snowflake};
-    pages: {[key: Snowflake]: number};
-}
-
-export class MessageController {
-
-    message: MessageGenerator;
-    forceList: boolean = false;
-    disableButtons?: string[];
-
-    messages: {[key: Snowflake]: Message} = {};
-    pages: {[key: Snowflake]: {
-        page: number,
-        pages?: MessageOptions[],
+export class MessageController implements Serializable<MessageSave> {
+    
+    messages: {[key: Snowflake]: {
+        msg: Message,
+        cache?: MessageEmbedOptions[],
+        page?: number,
     }} = {};
 
-    constructor(message: MessageGenerator = (() => ({})), forceList: boolean = false) {
-        this.message = message;
-        this.forceList = forceList;
+    async send(channel: TextBasedChannel, options: MessageOptions, i?: BaseCommandInteraction | MessageComponentInteraction | ModalSubmitInteraction) {
+        const previous = this.messages[channel.id];
+        let page = previous?.page ?? 0;
+
+        const cache = prepareMessage(options);
+        if (page >= cache.length) page = cache.length - 1;
+
+        const prepared = {
+            embeds: [cache[page]],
+            components: cache.length > 1 || options.forceList
+                ? addPageButtons(options.components, page, cache.length)
+                : options.components,
+        };
+
+        let msg: Message;
+
+        if (i) {
+            if (i.isCommand()) {
+                msg = await i.reply({ ...prepared, fetchReply: true }) as Message;
+            } else {
+                msg = await (i as MessageComponentInteraction | ModalSubmitInteraction).update({ ...prepared, fetchReply: true }) as Message;
+            }
+        } else {
+            if (previous) {
+                msg = await previous.msg.edit(prepared);
+            } else {
+                msg = await channel.send(prepared);
+            }
+        }
+
+        this.messages[channel.id] = {
+            msg,
+            cache: cache.length > 1 ? cache : undefined,
+            page:          page > 0 ? page  : undefined,
+        }
+    }
+
+    async flipPage(i: ButtonInteraction) {
+        const previous = this.messages[i.channel!.id];
+        let page = previous.page ?? 0;
+        let cache = previous.cache;
+
+        if (!cache) {
+            return;
+        }
+
+        switch (i.customId) {
+            case '_prevpage':
+                if (page > 0) page -= 1;
+                break;
+            case '_nextpage':
+                page += 1;
+                break;
+        }
+        if (page >= cache.length) page = cache.length - 1;
+
+        const prepared = {
+            embeds: [cache[page]],
+            components: addPageButtons(previous.msg.components, page, cache.length),
+        };
+
+        const msg = await i.update({ ...prepared, fetchReply: true }) as Message;
+
+        this.messages[msg.channel.id] = {
+            msg,
+            page,
+            cache,
+        }
     }
 
     save(): MessageSave {
-        return {
-            forceList: this.forceList,
-            disableButtons: this.disableButtons,
-            messages: Object.fromEntries(Object.entries(this.messages).map(([k, v]) => [k, v.id])),
-            pages: Object.fromEntries(Object.entries(this.pages).filter(([k, v]) => v.page > 0).map(([k, v]) => [k, v.page])),
-        };
+        return Object.fromEntries(
+            Object.entries(this.messages)
+                .map(([k, v]) => [k, { msg: v.msg.id, cache: v.cache, page: v.page }])
+        );
     }
 
-    load(client: Client, save: MessageSave) {
-        this.forceList = save.forceList;
-        this.disableButtons = save.disableButtons;
-        this.pages = Object.fromEntries(Object.entries(save.pages).map(([k, v]) => [k, { page: v }]));
+    async load(client: Client, save: MessageSave) {
+        const promises: Promise<void>[] = [];
 
-        const promises: Promise<any>[] = [];
-
-        for (const [k, v] of Object.entries(save.messages)) {
-            promises.push(client.channels.fetch(k).then(c => {
-                if (!c?.isText()) return;
-                return c.messages.fetch(v).then(m => {
-                    this.messages[k] = m;
+        for (const [k, v] of Object.entries(save)) {
+            promises.push(client.channels.fetch(k).then(async c => {
+                if (!c?.isText()) throw new Error();
+                await c.messages.fetch(v.msg).then(m => {
+                    this.messages[k] = { msg: m, page: v.page, cache: v.cache };
                 });
             }));
         }
 
-        return Promise.all(promises);
-    }
-
-    async sendMessage(channel: TextBasedChannel, sender: MessageSender, prev?: Message, disableAllButtons = false) {
-        const page = prev ? this.pages[prev.channel.id]?.page ?? 0 : 0;
-
-        let transformer = this.disableButtons ? (o: MessageOptions) => disableButtons(o, ...this.disableButtons!) : undefined;
-        if (disableAllButtons) transformer = disableButtons;
-
-        const [cur, pages] = prepareMessage(this.message(channel, prev), page, this.forceList, transformer);
-        
-        const msg = await sender(cur);
-
-        if (!prev) {
-            this.messages[msg.channel.id] = msg;
-        }
-
-        if (pages) {
-            this.pages[msg.channel.id] = { page, pages };
-        }
-
-        return msg;
-    }
-
-    reply(i: BaseCommandInteraction | MessageComponentInteraction | ModalSubmitInteraction) {
-        if (!i.channel) throw new Error("Unknown channel");
-        return this.sendMessage(i.channel, (o => i.reply({ ...o, fetchReply: true })) as MessageSender);
-    }
-
-    send(channel: TextBasedChannel) {
-        return this.sendMessage(channel, (o => channel.send(o)));
-    }
-
-    update(i: MessageComponentInteraction | ModalSubmitInteraction) {
-        if (!i.channel || !i.message) throw new Error("Unknown message");
-        return this.sendMessage(i.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, i.message as Message);
-    }
-
-    updateMessage(m: Message) {
-        return this.sendMessage(m.channel, (o => m.edit(o)), m);
-    }
-
-    updateAll(i?: MessageComponentInteraction | ModalSubmitInteraction) {
-        const promises: Promise<any>[] = [];
-
-        for (const msg of Object.values(this.messages)) {
-            if (i && i.message === msg) {
-                promises.push(this.sendMessage(msg.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, msg));
-            } else {
-                promises.push(this.sendMessage(msg.channel, (o => msg.edit(o)), msg));
-            }
-        }
-
-        return Promise.all(promises);
-    }
-
-    end(i: MessageComponentInteraction | ModalSubmitInteraction) {
-        if (!i.channel || !i.message) throw new Error("Unknown message");
-        delete this.messages[i.channel.id];
-        delete this.pages[i.channel.id];
-        return this.sendMessage(i.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, i.message as Message, true);
-    }
-
-    endMessage(msg: Message) {
-        delete this.messages[msg.channel.id];
-        delete this.pages[msg.channel.id];
-        return this.sendMessage(msg.channel, (o => msg.edit(o)), msg, true);
-    }
-
-    endAll(i?: MessageComponentInteraction | ModalSubmitInteraction) {
-        const promises: Promise<any>[] = [];
-
-        for (const msg of Object.values(this.messages)) {
-            if (i && i.message === msg) {
-                promises.push(this.sendMessage(msg.channel, (o => i.update({ ...o, fetchReply: true })) as MessageSender, msg, true));
-            } else {
-                promises.push(this.sendMessage(msg.channel, (o => msg.edit(o)), msg, true));
-            }
-        }
-
-        this.messages = {};
-        this.pages = {};
-
-        return Promise.all(promises);
+        await Promise.all(promises);
     }
 
     isMyInteraction(i: MessageComponentInteraction | ModalSubmitInteraction) {
-        if (!i.channel || !i.message) throw new Error("Unknown message");
-        return this.messages[i.channel.id]?.id === i.message.id;
+        return this.messages[i.channel!.id]?.msg === i.message;
     }
 
 }
+

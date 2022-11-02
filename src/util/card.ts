@@ -1,4 +1,4 @@
-import { MessageComponentInteraction, User } from "discord.js";
+import { MessageComponentInteraction } from "discord.js";
 
 // A generic card supports two types of empty spots
 // '_'  (a blank) gets replaced with some text defined by the game/user
@@ -8,17 +8,34 @@ export function countBlanks(card: string) {
     return card.match(/\\_/gi)?.length || 1;
 }
 
-export function fillPlayers(card: string, players: User[]) {
-    const copy = [...players];
+export function countRealizations(card: string) {
+    return card.match(/{}/gi)?.length || 0;
+}
+
+export function shuffle<T>(a: T[]): T[] {
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+export function realizeCard(card: string, realizations: string[]) {
+    const copy = [...realizations];
     return card.replaceAll(
         "{}",
-        () => copy.splice(Math.floor(Math.random() * copy.length), 1)[0].toString()
+        () => copy.shift()!
     );
 }
 
 export function fillBlanks(card: string, blanks: (string | null)[]) {
+    if (!card.match(/\\_/gi)?.length) {
+        return `${card}\n> ${bolden(blanks.map(s => s ?? '\\_').join(' '))}`;
+    }
+
+    const copy = [...blanks];
     return card.replaceAll("\\_", () => {
-        let card = blanks.shift();
+        let card = copy.shift();
         if (!card) return "\\_";
 
         // rules to make the blank fit the sentence

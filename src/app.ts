@@ -4,7 +4,7 @@ config();
 
 // Require the necessary discord.js classes
 import { Client, Intents } from 'discord.js';
-import { GameInstance, gameInstances, games, GameSave } from "./game/game";
+import { GameImpl, games, GameSave, gametypes } from "./game/game";
 import Nedb = require("nedb");
 
 // Create a new client instance
@@ -15,12 +15,12 @@ const db = new Nedb({ filename: "db/games", autoload: true });
 
 // When the client is ready, run this code (only once)
 client.once('ready', async () => {
-    db.find({}, (_: any, docs: GameSave<any, any>[]) => {
+    db.find({}, (_: unknown, docs: GameSave<unknown>[]) => {
         for (const save of docs) {
-            const game = games[save.game];
-            const instance = new GameInstance(game);
+            const game = gametypes[save.game];
+            const instance = new GameImpl(game);
             instance.load(client, save).then(() => {
-                gameInstances.push(instance);
+                games.push(instance);
                 console.log(`Loaded ${save.game} game`);
             });
         }
@@ -34,31 +34,14 @@ client.on('error', e => {
 });
 
 // On commands
-client.on('interactionCreate', async interaction => {
-    if (interaction.isButton()) {
-        for (const game of gameInstances) {
+client.on('interactionCreate', interaction => {
+    if (interaction.isMessageComponent() || interaction.isModalSubmit()) {
+        for (const game of games) {
             if (game.isMyInteraction(interaction)) {
-                game.resolveButton(interaction);
+                game.onInteraction(interaction);
                 return;
             }
         }
-        return;
-    } else if (interaction.isSelectMenu()) {
-        for (const game of gameInstances) {
-            if (game.isMyInteraction(interaction)) {
-                game.resolveSelect(interaction);
-                return;
-            }
-        }
-        return;
-    } else if (interaction.isModalSubmit()) {
-        for (const game of gameInstances) {
-            if (game.isMyInteraction(interaction)) {
-                game.resolveModal(interaction);
-                return;
-            }
-        }
-        return;
     }
     
     if (!interaction.isCommand()) return;
@@ -73,9 +56,9 @@ client.on('interactionCreate', async interaction => {
                 return;
             }
 
-            for (const game of gameInstances) {
+            for (const game of games) {
                 if (game.lobby === interaction.channel) {
-                    interaction.reply({ ephemeral: true, content: "There's already an active game in this channel!" });
+                    interaction.reply({ ephemeral: true, content: "There is already an active game in this channel!" });
                     return;
                 }
             }
@@ -85,13 +68,13 @@ client.on('interactionCreate', async interaction => {
                 interaction.reply({ ephemeral: true, content: "Error: unknown game!" });
                 return;
             }
-            const newGame = games[name];
+            const newGame = gametypes[name];
             if (!newGame) {
                 interaction.reply({ ephemeral: true, content: "Error: unknown game!" });
                 return;
             }
 
-            new GameInstance(newGame).start(interaction);
+            new GameImpl(newGame).start(interaction);
             return;
         case "stop":
             if (!interaction.channel) {
@@ -99,26 +82,18 @@ client.on('interactionCreate', async interaction => {
                 return;
             }
 
-            for (const game of gameInstances) {
+            for (const game of games) {
                 if (game.lobby === interaction.channel) {
-                    // Send to players
-                    if (game.game.playedInDms) {
-                        for (const player of game.players) {
-                            player.send({ content: "Game forcefully stopped." });
-                        }
-                    }
+                    // Kill the game
+                    game.end();
 
                     // Send to lobby
-                    await interaction.reply({ content: "Game forcefully stopped." });
-
-                    // Kill the game
-                    game.kill();
+                    interaction.reply({ content: "Game forcefully stopped." });
                     return;
                 }
             }
 
-
-            interaction.reply({ ephemeral: true, content: "There's no active game in this channel!" });
+            interaction.reply({ ephemeral: true, content: "There is no active game in this channel!" });
             return;
     }
 });
@@ -126,19 +101,20 @@ client.on('interactionCreate', async interaction => {
 // Login to Discord with your client's token
 client.login(process.env.TOKEN);
 
-process.on("exit", () => {
-    db.remove({}, () => {
-        db.insert(gameInstances.map(g => g.save()), () => {
-            console.log("Saved games");
-        });
-    });
-});
-
-process.on('SIGINT', () => {
-    db.remove({}, () => {
-        db.insert(gameInstances.map(g => g.save()), () => {
-            console.log("Saved games");
-            process.exit();
-        });
-    });
-});
+// process.on("exit", () => {
+//     db.remove({}, () => {
+//         db.insert(games.map(g => g.save()), () => {
+//             console.log("Saved games");
+//         });
+//     });
+// });
+//
+// process.on('SIGINT', () => {
+//     db.remove({}, () => {
+//         db.insert(games.map(g => g.save()), () => {
+//             console.log("Saved games");
+//             process.exit();
+//         });
+//     });
+// });
+//

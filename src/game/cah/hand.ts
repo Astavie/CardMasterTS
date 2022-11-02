@@ -1,257 +1,211 @@
-import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowComponentResolvable, MessageActionRowOptions, MessageComponentInteraction, ModalSubmitInteraction } from "discord.js";
-import { countBlanks, escapeDiscord, fillBlanks, fillModal, fillPlayers } from "../../util/card";
-import { GameInstance, shuffle } from "../game";
-import { CAH, CAHState, randoId, addPlayer, removePlayer, CAHContext, getBlackCard, getWhiteCard } from "./cah";
+import { EmbedFieldData, MessageActionRowOptions, MessageComponentInteraction, ModalSubmitInteraction, User } from 'discord.js';
+import { countBlanks, escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
+import { createButtonGrid, MessageOptions } from '../../util/message';
+import { Game, Logic, Resolve } from '../logic';
+import { getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
 
-export function setupHAND(game: GameInstance<CAHContext, CAHState>): CAHState {
-    // Get black card
-    const card = getBlackCard(game.context);
-    if (!card) {
-        game.sendAll(() => ({
-            embeds: [{
-                color: CAH.color,
-                description: "**The game has ended because there are no more black cards left.**"
-            }]
-        }));
-        return "END";
-    }
+function message(ctx: RoundContext, game: Game, player: User | null): MessageOptions {
+    let prompt = getBlackCard(ctx.prompt);
+    const blanks = countBlanks(prompt);
+    
+    const fields: EmbedFieldData[] = [];
+    const components: (Required<MessageActionRowOptions>)[] = [];
 
-    game.context.prompt = fillPlayers(card, game.players);
-    const blanks = countBlanks(game.context.prompt);
+    const allPlaying = Object.entries(ctx.playing).filter(([k, _v]) => k !== randoId).map(([_k, v]) => v);
+    const playedCards = ctx.quiplash ? allPlaying.filter(p => p !== null).length : allPlaying.filter(p => !p.includes(null)).length;
+    const totalPlayers = game.players.length - 1;
 
-    // Give white cards
-    if (!game.context.flags[1]) {
-        for (const player of game.players) {
-            const hand = game.context.players[player.id].hand;
-            while (hand.length < game.context.handCards) {
-                const card = getWhiteCard(game.context);
-                if (!card) {
-                    game.sendAll(() => ({
-                        embeds: [{
-                            color: CAH.color,
-                            description: "**The game has ended because there are not enough white cards left.**"
-                        }]
-                    }));
-                    return "END";
-                }
-                hand.push(fillPlayers(card, game.players));
-            }
-        }
-    } else {
-        for (const player of game.players) {
-            game.context.players[player.id].hand = [];
-            game.context.players[player.id].hidden = false;
-        }
-    }
+    if (player && player !== game.players[ctx.czar]) {
 
-    // Set czar
-    game.context.czar = game.context.czar >= game.players.length - 1 ? 0 : game.context.czar + 1;
+        if (!ctx.quiplash) {
 
-    // Set cards being played
-    for (const player of Object.values(game.context.players)) player.playing = Array(blanks).fill(null);
+            const playing = ctx.playing[player.id];
+            const hand = ctx.hand[player.id];
 
-    if (game.context.flags[0]) {
-        game.context.players[randoId].hand = [];
-        for (let i = 0; i < blanks; i++) {
-            const card = getWhiteCard(game.context);
-            if (!card) {
-                game.sendAll(() => ({
-                    embeds: [{
-                        color: CAH.color,
-                        description: "**The game has ended because there are not enough white cards left.**"
-                    }]
-                }));
-                return "END";
-            }
-            game.context.players[randoId].hand.push(fillPlayers(card, game.players));
-        }
-        game.context.players[randoId].playing = game.context.players[randoId].hand.map((_, i) => i);
-    }
+            prompt = fillBlanks(prompt, playing.map(i => i !== null ? getWhiteCard(hand[i]) : null));
 
-    return "HAND";
-}
+            fields.push({
+                name: 'Hand',
+                value: hand.map((c, i) => `\`${(i + 1).toString().padStart(2)}.\` ${getWhiteCard(c)}`).join('\n'),
+            });
 
-export function displayHAND(game: GameInstance<CAHContext, CAHState>) {
-    game.sendAll();
-}
+            const playingStyle = !playing.includes(null) ? 'SUCCESS' : 'PRIMARY';
+            const disableUnplayed = !playing.includes(null) && blanks > 1;
 
-export function resumeHAND(game: GameInstance<CAHContext, CAHState>) {
-    const blanks = countBlanks(game.context.prompt!);
-    const randomDisabled = game.context.whiteDeck.length < blanks * game.players.length;
+            components.push(...createButtonGrid(ctx.handCards, i => ({
+                style: playing.includes(i) ? playingStyle : 'SECONDARY',
+                label: (i + 1).toString(),
+                customId: `hand_${i}`,
+                disabled: disableUnplayed && !playing.includes(i),
+            })));
 
-    // Display round
-    game.activeMessage.forceList = true;
-
-    game.activeMessage.message = channel => {
-        const fields: EmbedFieldData[] = [];
-
-        const player = channel.type == "DM" ? channel.recipient : undefined;
-
-        let components: (Required<BaseMessageComponentOptions> & MessageActionRowOptions)[] = [];
-
-        let prompt = game.context.prompt as string;
-
-        const playedCards = Object.values(game.context.players).filter(p => !p.playing.includes(null)).length;
-        const totalPlayers = Object.values(game.context.players).length - 1;
-
-        if (player && game.players[game.context.czar] !== player) {
-            const pstate = game.context.players[player.id];
-            const playing = pstate.playing;
-
-            if (!pstate.hidden || playedCards === totalPlayers) {
-                prompt = fillBlanks(prompt, pstate.playing.map(i => typeof i !== 'number' ? i : pstate.hand[i]));
-            }
-
-            if (!game.context.flags[1]) {
-                // Hand buttons
-                fields.push({
-                    name: "Hand",
-                    value: pstate.hand.map((c, i) => `\`${(i + 1).toString().padStart(2)}.\` ${c}`).join("\n")
-                });
-
-                const playingStyle = !playing.includes(null) ? "SUCCESS" : "PRIMARY";
-                const disableUnplayed = !playing.includes(null) && blanks > 1;
-
-                let hand = 0;
-                while (hand < game.context.handCards) {
-                    const row: MessageActionRowComponentResolvable[] = [];
-                    for (let i = 0; i < 5; i++) {
-                        row.push({
-                            type: "BUTTON",
-                            style: playing.includes(hand) ? playingStyle : "SECONDARY",
-                            label: (hand + 1).toString(),
-                            customId: `hand_${hand}`,
-                            disabled: !playing.includes(hand) && disableUnplayed,
-                        });
-
-                        hand++;
-                        if (hand >= game.context.handCards) break;
-                    }
-                    components.push({
-                        type: "ACTION_ROW",
-                        components: row
-                    });
-                }
-            } else {
-                // Fill modal
-                components.push({
-                    type: "ACTION_ROW",
-                    components: [{
-                        type: "BUTTON",
-                        style: playing.includes(null) || pstate.hidden ? "SECONDARY" : "SUCCESS",
-                        label: "Fill",
-                        customId: `fill`,
-                        disabled: pstate.hidden,
-                    }, {
-                        type: "BUTTON",
-                        style: pstate.hidden ? "SUCCESS" : "SECONDARY",
-                        label: "Random",
-                        customId: `random`,
-                        disabled: randomDisabled
-                    }]
-                });
-            }
-        }
-
-        prompt = `> ${prompt}`
-        prompt = `Card Czar: ${game.players[game.context.czar]}\n\n${prompt}`;
-
-        const message = prompt + `\n\n*${playedCards}/${totalPlayers} players have selected ${blanks === 1 ? "a card" : "their cards"}.*`;
-
-        fields.unshift({
-            name: "Prompt",
-            value: message
-        });
-
-        return {
-            embeds: [{
-                color: CAH.color,
-                fields: fields
-            }],
-            components: components
-        };
-    };
- 
-    const check = (i : MessageComponentInteraction | ModalSubmitInteraction): Promise<CAHState> | null => {
-        if (game.players.every((p, i) => game.context.czar === i || !game.context.players[p.id].playing.includes(null))) {
-            // All players are ready
-            game.activeMessage.end(i);
-            for (const m of Object.values({ ...game.activeMessage.messages })) {
-                if (m.channel.type == "DM") {
-                    game.activeMessage.endMessage(m);
-                }
-            }
-
-            return Promise.resolve("READ");
         } else {
-            game.activeMessage.updateAll(i);
-        }
-        return null;
-    };
 
-    // Select card logic
-    if (!game.context.flags[1]) {
-        for (let index = 0; index < game.context.handCards; index++) {
-            game.onButton(`hand_${index}`, i => {
-                const player = i.user;
-                const playing = game.context.players[player.id].playing;
-                const pIndex = playing.indexOf(index);
-                let uIndex = playing.indexOf(null);
-                if (pIndex === -1) {
-                    if (uIndex === -1) {
-                        if (blanks === 1) uIndex = 0;
-                        else return null;
-                    }
-                    playing[uIndex] = index;
+            const playing = ctx.playing[player.id];
+            if (playing !== 'random' && playing !== null) prompt = fillBlanks(prompt, playing);
 
-                    if (playing.indexOf(null) === -1) {
-                        return check(i);
-                    } else {
-                        game.activeMessage.update(i);
-                    }
-                } else {
-                    playing[pIndex] = null;
-
-                    if (uIndex === -1) {
-                        game.activeMessage.updateAll(i);
-                    } else {
-                        game.activeMessage.update(i);
-                    }
-                }
-                return null;
+            components.push({
+                type: 'ACTION_ROW',
+                components: [{
+                    type: 'BUTTON',
+                    style: playing === 'random' || playing === null ? 'SECONDARY' : 'SUCCESS',
+                    label: 'Fill',
+                    customId: 'fill',
+                    disabled: playing === 'random',
+                }, {
+                    type: 'BUTTON',
+                    style: playing === 'random' ? 'SUCCESS' : 'SECONDARY',
+                    label: 'Random',
+                    customId: 'random',
+                    disabled: false,
+                }]
             });
         }
-    } else {
-        game.onButton("fill", i => {fillModal(game.context.prompt!, i); return null;});
+    }
 
-        game.onModal("fill_modal", i => {
-            const player = i.user;
-            game.context.players[player.id].playing = i.components.map(c => escapeDiscord(c.components[0].value));
-            return check(i);
-        });
+    prompt = `> ${prompt}`;
+    prompt = `Card Czar: ${game.players[ctx.czar]}\n\n${prompt}`;
+    prompt = `${prompt}\n\n*${playedCards}/${totalPlayers} players have selected ${blanks === 1 ? 'a card' : 'their cards'}.*`;
 
-        game.onButton("random", i => {
-            const player = i.user;
-            const pstate = game.context.players[player.id];
-            if (pstate.hidden) {
-                pstate.hidden = false;
-                pstate.playing = Array(blanks).fill(null);
-                game.activeMessage.updateAll(i);
-                return null;
-            } else {
-                pstate.hidden = true;
-                pstate.playing = [];
-                while (pstate.playing.length < blanks) pstate.playing.push(getWhiteCard(game.context)!);
-                return check(i);
-            }
+    fields.unshift({
+        name: 'Prompt',
+        value: prompt,
+    });
+
+    if (player) {
+        components.push({
+            type: 'ACTION_ROW',
+            components: [{
+                type: 'BUTTON',
+                customId: '_leave',
+                style: 'DANGER',
+                label: 'Leave',
+            }]
         });
     }
 
-    // Join and leave logic
-    game.join = (i, player) => addPlayer(i, game, player);
-    game.leave = (i, player, index) => removePlayer(i, game, player, index);
-    game.minPlayers = () => 2;
-    game.maxPlayers = () => 20;
-    game.addLeaveButton(!game.context.flags[1]);
-    game.addSupportedLogic();
+    return {
+        embeds: [{ fields: fields }],
+        components,
+        forceList: true,
+    };
 }
+
+export const handLogic: Logic<void, RoundContext> = {
+    onEnter(ctx, game) {
+        game.updateMessage(p => message(ctx, game, p));
+    },
+    onExit(_ctx, game) {
+        // do not close spectator message
+        game.closeMessage(undefined, undefined, u => u !== null);
+    },
+    onInteraction(ctx, game, resolve, i) {
+        if (i.customId === '_join') {
+            if (!i.replied) {
+                game.updateMessage(p => message(ctx, game, p), i);
+            }
+        } else if (i.customId === '_leave') {
+            if (!i.replied) {
+                // When someone leaves, do a quick check if the rest of the players are done
+                resolveWhenPlayersDone(ctx, game, i, resolve);
+            }
+        } else if (!ctx.quiplash) {
+            if (i.customId.startsWith('hand_')) {
+                const prompt = getBlackCard(ctx.prompt);
+                const blanks = countBlanks(prompt);
+                const hand = parseInt(i.customId.substring(5));
+
+                const player = i.user;
+                const playing = ctx.playing[player.id];
+                const pindex = playing.indexOf(hand);
+                
+                let uindex = playing.indexOf(null);
+
+                if (pindex === -1) {
+                    if (uindex === -1) {
+                        if (blanks === 1) uindex = 0;
+                        else return;
+                    }
+                    playing[uindex] = hand;
+
+                    if (playing.indexOf(null) === -1) {
+                        resolveWhenPlayersDone(ctx, game, i, resolve);
+                    } else {
+                        game.updateMessage(message(ctx, game, player), i);
+                    }
+                } else {
+                    playing[pindex] = null;
+                    
+                    if (uindex === -1) {
+                        game.updateMessage(p => message(ctx, game, p), i);
+                    } else {
+                        game.updateMessage(message(ctx, game, player), i);
+                    }
+                }
+            }
+        } else {
+            if (i.isButton()) {
+                if (i.customId === 'fill') {
+                    fillModal(getBlackCard(ctx.prompt), i);
+                } else if (i.customId === 'random') {
+                    if (ctx.playing[i.user.id] === 'random') {
+                        ctx.playing[i.user.id] = null;
+                        game.updateMessage(p => message(ctx, game, p), i);
+                    } else {
+                        const prompt = getBlackCard(ctx.prompt);
+                        const blanks = countBlanks(prompt);
+
+                        const count = Object.values(ctx.playing).filter(p => p === 'random').length + 1;
+                        if (count * blanks > ctx.whiteDeck.length) {
+                            i.reply({ content: 'There are not enough white cards left for this option!', ephemeral: true });
+                            return;
+                        }
+
+                        ctx.playing[i.user.id] = 'random';
+                        resolveWhenPlayersDone(ctx, game, i, resolve);
+                    }
+                }
+            } else if (i.isModalSubmit() && i.customId === 'fill_modal') {
+                ctx.playing[i.user.id] = i.components.map(c => escapeDiscord(c.components[0].value));
+                resolveWhenPlayersDone(ctx, game, i, resolve);
+            }
+        }
+    },
+
+};
+
+function allPlayersDone(ctx: RoundContext): boolean {
+    if (ctx.quiplash) {
+        return Object.values(ctx.playing).every(p => p !== null);
+    } else {
+        return Object.values(ctx.playing).every(p => !p.includes(null));
+    }
+}
+
+function resolveWhenPlayersDone(ctx: RoundContext, game: Game, i: MessageComponentInteraction | ModalSubmitInteraction, resolve: Resolve<void>) {
+    if (allPlayersDone(ctx)) {
+        // put random cards in
+        if (ctx.quiplash) {
+            const prompt = getBlackCard(ctx.prompt);
+            const blanks = countBlanks(prompt);
+            for (const player of Object.keys(ctx.playing)) {
+                if (ctx.playing[player] === 'random') {
+                    const cards: string[] = [];
+                    while (cards.length < blanks) {
+                        cards.push(getWhiteCard(realizeWhiteCard(ctx.whiteDeck.pop()!, game.players)));
+                    }
+                    ctx.playing[player] = cards;
+                }
+            }
+        }
+
+        // shuffle everyone
+        ctx.shuffle = shuffle(Object.keys(ctx.playing));
+
+        // next part!
+        game.closeMessage(p => message(ctx, game, p), i, u => u !== null).then(resolve);
+    } else {
+        game.updateMessage(p => message(ctx, game, p), i);
+    }
+}
+

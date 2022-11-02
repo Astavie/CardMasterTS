@@ -1,483 +1,276 @@
-import { ButtonInteraction, ColorResolvable, BaseCommandInteraction, Message, SelectMenuInteraction, User, MessageActionRowComponentOptions, TextBasedChannel, ThreadChannel, ModalSubmitInteraction, MessageActionRowComponentResolvable, MessageComponentInteraction, Snowflake, Client } from "discord.js";
-import { MessageController, MessageGenerator, MessageOptions, MessageSave } from "../util/message";
+import { Client, ColorResolvable, CommandInteraction, Message, Snowflake, TextBasedChannel, User } from "discord.js";
+import { disableButtons, MessageController, MessageOptions, MessageSave } from "../util/message";
+import { Serializable } from "../util/saving";
 import { CAH } from "./cah/cah";
+import { Game, Logic, MessageGenerator, UserInteraction } from "./logic";
 
 // Games
-export const gameInstances: GameInstance<any, any>[] = [];
-export const games: {[key: string]: Game<any, any>} = {};
+export const games: GameImpl<unknown>[] = [];
+export const gametypes: {[key: string]: GameType<unknown>} = {};
 
-function addGame(game: Game<any, any>): void {
-    games[game.name] = game;
+function addGame(game: GameType<unknown>): void {
+    gametypes[game.name] = game;
 }
 
 addGame(CAH);
 
-// Classes
-export type Game<Context extends object, State extends string> = {
+// Impl
+export type GameType<C> = {
     name: string,
     color: ColorResolvable,
-    playedInDms: boolean,
-    createContext: () => Context,
-
-    setup: (game: GameInstance<Context, State>) => void,
-    resume: {[s in State]: (game: GameInstance<Context, State>) => void},
-    change: {[s in State]?: (game: GameInstance<Context, State>) => void},
+    logic: Logic<unknown, C>,
+    initialContext(): C,
 }
 
-
-export type GameSave<Context extends object, State extends string> = {
+export type GameSave<C> = {
     game: string,
     players: Snowflake[],
-    setupMessage: MessageSave,
-    activeMessage: MessageSave,
-    state: State,
-    context: Context,
+    lobbyMessage: MessageSave,
+    stateMessage: MessageSave,
+    context: C,
     lobby?: Snowflake,
 }
 
-export class GameInstance<Context extends object, State extends string> {
+export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
-    buttons: {[key:string]: (i: ButtonInteraction) => Promise<State> | null} = {};
-    select:  {[key:string]: (i: SelectMenuInteraction) => Promise<State> | null} = {};
-    modals:  {[key:string]: (i: ModalSubmitInteraction) => Promise<State> | null} = {};
-
-    join?: (i: ButtonInteraction, player: User) => Promise<State> | null;
-    leave?: (i: ButtonInteraction, player: User, index: number) => Promise<State> | null;
-    maxPlayers: () => number = () => Number.MAX_SAFE_INTEGER;
-    minPlayers: () => number = () => 0;
-
-    game: Game<Context, State>;
-
-    // The following will be saved to a file
     players: User[] = [];
-    setupMessage: MessageController = new MessageController();
-    activeMessage: MessageController = new MessageController();
-    context: Context;
-
     lobby?: TextBasedChannel;
-    state?: State;
 
-    constructor(game: Game<Context, State>) {
-        this.game = game;
-        this.context = game.createContext();
+    type: GameType<C>;
+    context: C;
+
+    lobbyMessage: MessageController = new MessageController();
+    stateMessage: MessageController = new MessageController();
+
+    constructor(type: GameType<C>) {
+        this.type = type;
+        this.context = type.initialContext();
     }
 
-    save(): GameSave<Context, State> {
+    save(): GameSave<C> {
         return {
-            game: this.game.name,
+            game: this.type.name,
             players: this.players.map(p => p.id),
-            setupMessage: this.setupMessage.save(),
-            activeMessage: this.activeMessage.save(),
-            state: this.state!,
+            lobbyMessage: this.lobbyMessage.save(),
+            stateMessage: this.stateMessage.save(),
             context: this.context,
             lobby: this.lobby?.id,
         }
     }
 
-    async load(client: Client, save: GameSave<Context, State>) {
-        this.state = save.state;
-        this.context = save.context;
+    async load(client: Client, data: GameSave<C>): Promise<void> {
+        this.context = data.context;
 
-        const setup = new MessageController();
-        const active = new MessageController();
-
-        const promises: Promise<any>[] = [
-            setup.load(client, save.setupMessage),
-            active.load(client, save.activeMessage),
+        const promises: Promise<unknown>[] = [
+            this.stateMessage.load(client, data.stateMessage),
+            this.lobbyMessage.load(client, data.lobbyMessage),
         ];
 
-        this.players = Array(save.players.length);
+        this.players = Array(data.players.length);
         for (let i = 0; i < this.players.length; i++) {
-            promises.push(client.users.fetch(save.players[i]).then(u => this.players[i] = u));
+            promises.push(client.users.fetch(data.players[i]).then(p => this.players[i] = p));
         }
 
-        if (save.lobby) promises.push(
-            client.channels.fetch(save.lobby).then(c => {
-                if (!c?.isText()) return;
+        if (data.lobby) promises.push(
+            client.channels.fetch(data.lobby).then(c => {
+                if (!c?.isText()) throw new Error();
                 this.lobby = c;
             })
-        )
+        );
 
         await Promise.all(promises);
-    
-        this.activeMessage = setup;
-        this.game.setup(this);
-        this.resetControls();
-        this.activeMessage = active;
-        this.game.resume[this.state!](this);
     }
 
-    start(i: BaseCommandInteraction) {
-        gameInstances.push(this);
-        this.resetControls();
-        this.game.setup(this);
-        this.setupMessage.reply(i);
+    start(i: CommandInteraction) {
+        games.push(this);
+        this.type.logic.onEnter?.(this.context, this, () => this.end(), i);
     }
 
-    change(s: State) {
-        this.state = s;
-        this.resetControls();
-        this.game.resume[s](this);
-        this.game.change[s]?.(this);
-    }
+    end() {
+        this.type.logic.onExit?.(this.context, this);
+        games.splice(games.indexOf(this), 1);
 
-    kill() {
-        this.activeMessage.endAll();
-        this.setupMessage.endAll();
-        gameInstances.splice(gameInstances.indexOf(this), 1);
-
-        // archive created thread
         if (this.lobby && this.lobby.isThread() && this.lobby.ownerId === process.env.CLIENT_ID) {
-            this.lobby.setArchived(true, "Game ended.");
+            this.lobby.setArchived(true, 'Game ended.');
         }
     }
 
-    isMyInteraction(i: MessageComponentInteraction | ModalSubmitInteraction) {
-        return this.activeMessage.isMyInteraction(i) || this.setupMessage.isMyInteraction(i);
+    async allowSpectators(): Promise<void> {
+        const msg = Object.values(this.lobbyMessage.messages)[0].msg;
+        this.lobby = msg.channel.isThread()
+            ? msg.channel
+            : await msg.startThread({ name: this.type.name, autoArchiveDuration: 60 });
     }
 
-    onButton(button: string, callback: (i: ButtonInteraction) => Promise<State> | null) {
-        this.buttons[button] = callback;
+    isMyInteraction(i: UserInteraction) {
+        return this.stateMessage.isMyInteraction(i) || this.lobbyMessage.isMyInteraction(i);
     }
 
-    resolveButton(inter: ButtonInteraction) {
-        const state = this.buttons[inter.customId]?.(inter);
-        if (state) state.then(s => this.change(s));
-    }
-
-    onModal(modal: string, callback: (i: ModalSubmitInteraction) => Promise<State> | null) {
-        this.modals[modal] = callback;
-    }
-
-    resolveModal(inter: ModalSubmitInteraction) {
-        const state = this.modals[inter.customId]?.(inter);
-        if (state) state.then(s => this.change(s));
-    }
-
-    onSelect(button: string, callback: (i: SelectMenuInteraction) => Promise<State> | null) {
-        this.select[button] = callback;
-    }
-
-    resolveSelect(inter: SelectMenuInteraction) {
-        const state = this.select[inter.customId]?.(inter);
-        if (state) state.then(s => this.change(s));
-    }
-
-    resetControls() {
-        this.buttons = {};
-        this.select = {};
-        this.modals = {};
-        this.join = undefined;
-        this.leave = undefined;
-
-        // Page flip buttons
-        this.buttons["_prevpage"] = i => {
-            if (!this.activeMessage.pages[i.channel!.id]) this.activeMessage.pages[i.channel!.id] = { page: 0 };
-
-            const p = this.activeMessage.pages[i.channel!.id]!;
-            p.page -= 1;
-            if (p.page < 0) p.page = 0;
-
-            if (!p.pages) {
-                this.activeMessage.update(i);
-            } else {
-                i.update(p.pages[p.page]);
-            }
-            return null;
-        };
-        this.buttons["_nextpage"] = i => {
-            if (!this.activeMessage.pages[i.channel!.id]) this.activeMessage.pages[i.channel!.id] = { page: 0 };
-
-            const p = this.activeMessage.pages[i.channel!.id]!;
-            p.page += 1;
-
-            if (!p.pages) {
-                this.activeMessage.update(i);
-            } else {
-                if (p.page >= p.pages.length) p.page = p.pages.length - 1;
-                i.update(p.pages[p.page]);
-            }
-            return null;
-        };
-    }
-
-    async startLobby(msg: Message): Promise<ThreadChannel> {
-        this.lobby = msg.channel.isThread() ? msg.channel : await msg.startThread({ name: CAH.name, autoArchiveDuration: 60 });
-        return this.lobby;
-    }
-
-    // easy to use messages
-    sendPrivate(message?: MessageGenerator): Promise<Message[]> {
-        let send: (c: TextBasedChannel) => Promise<Message>;
-        if (message) {
-            send = c => c.send(message(c));
+    onInteraction(i: UserInteraction) {
+        if (i.isButton() && (i.customId === '_prevpage' || i.customId === '_nextpage')) {
+            this.stateMessage.flipPage(i);
         } else {
-            const msg = this.activeMessage;
-            send = c => msg.send(c);
+            this.type.logic.onInteraction?.(this.context, this, () => this.end(), i);
         }
+    }
+
+    async sendSpectators(message: Partial<MessageOptions>): Promise<void> {
+        for (const embed of message.embeds ?? []) embed.color ??= this.type.color;
+        await this.lobby?.send(message);
+    }
+
+    async sendPlayers(message: Partial<MessageOptions>): Promise<void> {
+        for (const embed of message.embeds ?? []) embed.color ??= this.type.color;
 
         const promises: Promise<Message>[] = [];
-
-        for (const player of this.players) promises.push(player.createDM().then(dm => send(dm)));
-
-        return Promise.all(promises);
-    }
-
-    sendPublic(message?: MessageGenerator): Promise<Message | undefined> {
-        if (!this.lobby) return Promise.resolve(undefined);
-        if (message) {
-            return this.lobby.send(message(this.lobby));
-        } else {
-            return this.activeMessage.send(this.lobby);
+        for (const player of this.players) {
+            promises.push(
+                player.createDM().then(dm => dm.send(message))
+            );
         }
+        await Promise.all(promises);
     }
 
-    sendAll(message?: MessageGenerator): Promise<[Message[], Message | undefined]> {
-        return Promise.all([
-            this.sendPrivate(message),
-            this.sendPublic(message)
+    async sendAll(message: Partial<MessageOptions>): Promise<void> {
+        await Promise.all([
+            this.sendSpectators(message),
+            this.sendPlayers(message)
         ]);
     }
 
-    // easy to use inputs
+    async send(message: (user: User | null) => Partial<MessageOptions> | null): Promise<void> {
+        const promises: Promise<Message>[] = [];
+        
+        if (this.lobby) {
+            const msg = message(null);
+            if (msg) {
+                for (const embed of msg.embeds ?? []) embed.color ??= this.type.color;
+                promises.push(this.lobby.send(msg));
+            }
+        }
 
-    addFlagsInput(label: string, flags: string[], values: boolean[], onChange?: (index: number, value: boolean) => Promise<State> | null) {
-        // Add buttons
-        const msg = this.activeMessage;
+        for (const player of this.players) {
+            const msg = message(player);
+            if (msg) {
+                for (const embed of msg.embeds ?? []) embed.color ??= this.type.color;
+                promises.push(player.createDM().then(dm => dm.send(msg)));
+            }
+        }
 
-        const old = msg.message;
-        msg.message = (channel, prev) => {
-            const m = old(channel, prev);
+        await Promise.all(promises);
+    }
 
-            const components: MessageActionRowComponentOptions[] = [{
-                type: "BUTTON",
-                customId: `_${label}`,
-                label: label,
-                style: "PRIMARY",
-                disabled: true
-            }];
+    async updateLobby(message: MessageOptions, i?: UserInteraction | CommandInteraction): Promise<void> {
+        for (const embed of message.embeds) {
+            embed.title ??= this.type.name;
+            embed.color ??= this.type.color;
+        }
+        await this.lobbyMessage.send(
+            i?.channel ?? Object.values(this.lobbyMessage.messages)[0].msg.channel,
+            message,
+            i
+        );
+    }
 
-            flags.forEach((flag, i) => components.push({
-                type: "BUTTON",
-                customId: `_${label}_${i}`,
-                label: flag,
-                style: values[i] ? "SUCCESS" : "SECONDARY"
-            }));
-
-            m.components ??= [];
-            m.components.push({
-                type: "ACTION_ROW",
-                components: components
-            });
-            return m;
+    async closeLobby(i?: UserInteraction, exceptions?: string[]): Promise<void> {
+        const msg = Object.values(this.lobbyMessage.messages)[0].msg;
+        const options = {
+            embeds: msg.embeds,
+            components: disableButtons(msg.components, exceptions),
         };
-
-        // Add button logic
-        flags.forEach((_, index) => {
-            this.onButton(`_${label}_${index}`, i => {
-                values[index] = !values[index];
-                const ret = onChange?.(index, values[index]) ?? null;
-                msg.updateAll(i);
-                return ret;
-            });
-        });
+        if (i) {
+            await i.update(options);
+        } else {
+            await msg.edit(options);
+        }
     }
 
-    addNumberInput(label: string, min: number, def: number, max: number, onChange?: (value: number) => Promise<State> | null) {
-        const msg = this.activeMessage;
+    async updateMessage(message: MessageOptions | MessageGenerator, i?: UserInteraction): Promise<void> {
+        if (typeof message === 'function') {
+            const promises: Promise<void>[] = [];
 
-        let value = def;
-
-        // Add buttons
-        const old = msg.message;
-        msg.message = (channel, prev) => {
-            const m = old(channel, prev);
-
-            m.components ??= [];
-            m.components.push({
-                type: "ACTION_ROW",
-                components: [{
-                    type: "BUTTON",
-                    customId: `_${label}`,
-                    label: label,
-                    style: "PRIMARY",
-                    disabled: true
-                },{
-                    type: "BUTTON",
-                    style: "PRIMARY",
-                    label: "◀",
-                    customId: `_${label}_dec`,
-                    disabled: value <= min
-                },{
-                    type: "BUTTON",
-                    style: "SECONDARY",
-                    label: value.toString(),
-                    customId: `_${label}_def`
-                },{
-                    type: "BUTTON",
-                    style: "PRIMARY",
-                    label: "▶",
-                    customId: `_${label}_inc`,
-                    disabled: value >= max
-                }]
-            });
-            return m;
-        };
-
-        // Add button logic
-        this.onButton(`_${label}_def`, i => {
-            value = def;
-            const ret = onChange?.(value) ?? null;
-            msg.updateAll(i);
-            return ret;
-        });
-        this.onButton(`_${label}_dec`, i => {
-            if (value > min) value -= 1;
-            const ret = onChange?.(value) ?? null;
-            msg.updateAll(i);
-            return ret;
-        });
-        this.onButton(`_${label}_inc`, i => {
-            if (value < max) value += 1;
-            const ret = onChange?.(value) ?? null;
-            msg.updateAll(i);
-            return ret;
-        });
-    }
-    
-    addSupportedLogic() {
-        if (this.leave) this.addLeaveLogic();
-        if (this.join) this.addJoinLogic();
-    }
-
-    addJoinLogic() {
-        this.onButton("_join", i => {
-            const max = this.maxPlayers();
-
-            if (this.players.indexOf(i.user) >= 0) {
-                i.reply({ content: "You've already joined!", ephemeral: true });
-                return null;
+            if (this.lobby) {
+                const msg = message(null);
+                if (msg) {
+                    for (const embed of msg.embeds) {
+                        embed.title ??= this.type.name;
+                        embed.color ??= this.type.color;
+                    }
+                    promises.push(this.stateMessage.send(
+                        this.lobby,
+                        msg, 
+                        i?.channel === this.lobby ? i : undefined
+                    ));
+                }
             }
-            if (this.players.length >= max) {
-                i.reply({ content: "Game is already full!", ephemeral: true });
-                return null;
+
+            for (const player of this.players) {
+                const msg = message(player);
+                if (msg) {
+                    for (const embed of msg.embeds) {
+                        embed.title ??= this.type.name;
+                        embed.color ??= this.type.color;
+                    }
+                    promises.push(player.createDM().then(dm => this.stateMessage.send(
+                        dm,
+                        msg,
+                        i?.channel === dm ? i : undefined
+                    )));
+                }
             }
-    
-            return this.join?.(i, i.user) ?? null;
-        });
+
+            await Promise.all(promises);
+        } else {
+            for (const embed of message.embeds) {
+                embed.title ??= this.type.name;
+                embed.color ??= this.type.color;
+            }
+            await this.stateMessage.send(i!.channel!, message, i);
+        }
     }
 
-    addLeaveLogic() {
-        this.onButton("_leave", i => {
-            const index = this.players.indexOf(i.user);
-            if (index === -1) {
-                i.reply({ content: "You haven't even joined!", ephemeral: true });
-                return null;
-            }
-    
-            return this.leave?.(i, i.user, index) ?? null;
-        });
-    }
+    async closeMessage(message?: MessageGenerator, i?: UserInteraction, filter: (user: User | null) => boolean = () => true): Promise<void> {
+        const promises: Promise<unknown>[] = [];
 
-    addLeaveButton(addRow = true) {
-        // Add button
-        const msg = this.activeMessage;
+        for (const obj of Object.values(this.stateMessage.messages)) {
+            const channel = obj.msg.channel;
+            const user = channel.type === "DM" ? channel.recipient : null;
+            if (!filter(user)) continue;
 
-        const old = msg.message;
-        msg.message = (channel, prev) => {
-            const m = old(channel, prev);
-            if (channel.type !== "DM") return m;
+            const msg = message?.(user);
 
-            m.components ??= [];
-            if (addRow || m.components.length == 0) {
-                m.components.push({
-                    type: "ACTION_ROW",
-                    components: [{
-                        type: "BUTTON",
-                        customId: "_leave",
-                        label: "Leave",
-                        style: "DANGER"
-                    }]
-                });
+            if (msg) {
+                for (const embed of msg.embeds) {
+                    embed.title ??= this.type.name;
+                    embed.color ??= this.type.color;
+                }
+                const options = {
+                    embeds: msg.embeds,
+                    components: disableButtons(msg.components),
+                    forceList: false,
+                };
+                promises.push(this.stateMessage.send(
+                    channel,
+                    options,
+                    i?.channel === channel ? i : undefined,
+                ));
             } else {
-                (m.components[0].components as MessageActionRowComponentResolvable[]).push({
-                    type: "BUTTON",
-                    customId: "_leave",
-                    label: "Leave",
-                    style: "DANGER"
-                });
-            }
-            return m;
-        };
-    }
-    
-    setSetupMessage(start: (i: ButtonInteraction) => Promise<State> | null) {
-        const msg = this.activeMessage;
-
-        // Add buttons
-        const old = msg.message;
-        msg.message = (channel, prev) => {
-            const m = old(channel, prev);
-
-            const min = this.minPlayers();
-            const max = this.maxPlayers();
-
-            const components: MessageActionRowComponentOptions[] = [{
-                type: "BUTTON",
-                customId: "_join",
-                label: "Join",
-                style: "SUCCESS"
-            },{
-                type: "BUTTON",
-                customId: "_leave",
-                label: "Leave",
-                style: "DANGER"
-            },{
-                type: "BUTTON",
-                customId: "_start",
-                label: "Start",
-                style: "PRIMARY",
-                disabled: this.players.length < min || this.players.length > max
-            }];
-
-            m.components ??= [];
-            m.components.push({
-                type: "ACTION_ROW",
-                components: components
-            });
-            return m;
-        };
-
-        // Add button logic
-        this.addLeaveLogic();
-        this.addJoinLogic();
-
-        this.onButton("_start", i => {
-            const min = this.minPlayers();
-            const max = this.maxPlayers();
-            
-            if (this.players.length < min) {
-                i.reply({ content: "Not enough players!", ephemeral: true });
-                return null;
-            }
-            if (this.players.length > max) {
-                i.reply({ content: "Too many players!", ephemeral: true });
-                return null;
+                const options = {
+                    embeds: obj.msg.embeds,
+                    components: disableButtons(obj.msg.components),
+                };
+                if (i?.channel === channel) {
+                    promises.push(i.update(options));
+                } else {
+                    promises.push(obj.msg.edit(options));
+                }
             }
 
-            return start(i);
-        });
+            delete this.stateMessage.messages[channel.id];
+        }
 
-        this.setupMessage = msg;
-        this.activeMessage = new MessageController();
+        await Promise.all(promises);
     }
 
 }
 
-export function shuffle<T>(a: T[]): T[] {
-    for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-}
