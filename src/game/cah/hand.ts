@@ -95,9 +95,9 @@ export const handLogic: Logic<void, RoundContext> = {
     onEnter(ctx, game) {
         game.updateMessage(p => message(ctx, game, p));
     },
-    onExit(_ctx, game) {
+    async onExit(_ctx, game) {
         // do not close spectator message
-        game.closeMessage(undefined, undefined, u => u !== null);
+        await game.closeMessage(undefined, undefined, u => u !== null);
     },
     onInteraction(ctx, game, resolve, i) {
         if (i.customId === '_join') {
@@ -105,7 +105,7 @@ export const handLogic: Logic<void, RoundContext> = {
                 game.updateMessage(p => message(ctx, game, p), i);
             }
         } else if (i.customId === '_leave') {
-            if (!i.replied) {
+            if (!i.replied && game.players.length >= 2) {
                 // When someone leaves, do a quick check if the rest of the players are done
                 resolveWhenPlayersDone(ctx, game, i, resolve);
             }

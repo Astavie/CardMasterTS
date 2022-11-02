@@ -171,11 +171,14 @@ export const joinLeaveLogic: Logic<void, GameContext> = {
                 ctx.context.czar -= 1;
                 game.sendAll({ embeds: [{
                     description: '**The round has been skipped because the Card Czar left the game.**'
-                }]})
-                resolve();
+                }]});
+                game.closeMessage().then(resolve);
                 return;
-            } else if (ctx.context.czar > index) {
-                ctx.context.czar -= 1;
+            } else {
+                if (ctx.context.czar > index) {
+                    ctx.context.czar -= 1;
+                }
+                game.closeMessage(undefined, i, player => player === i.user);
             }
         }
     },

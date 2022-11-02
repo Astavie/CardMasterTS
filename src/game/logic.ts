@@ -28,7 +28,7 @@ export type Resolve<T> = (t: T, i?: UserInteraction) => void;
 
 export type Logic<T, C> = {
     onEnter?(ctx: C, game: Game, resolve: Resolve<T>, i?: CommandInteraction): void,
-    onExit?(ctx: C, game: Game): void,
+    onExit?(ctx: C, game: Game): Awaitable<void>,
     onInteraction?(ctx: C, game: Game, resolve: Resolve<T>, interaction: UserInteraction): void,
 }
 
@@ -52,9 +52,9 @@ export class LogicSequence<T, S> implements Logic<T, KeyValuePairOf<S>> {
         this.map = map;
     }
 
-    onResolve(ctx: KeyValuePairOf<S>, game: Game, resolve: Resolve<T>, t: T | KeyValuePairOf<S>, i?: UserInteraction) {
+    async onResolve(ctx: KeyValuePairOf<S>, game: Game, resolve: Resolve<T>, t: T | KeyValuePairOf<S>, i?: UserInteraction) {
         if (t && 'state' in t) {
-            this.map[ctx.state].onExit?.(ctx.context, game);
+            await this.map[ctx.state].onExit?.(ctx.context, game);
             ctx.state = t.state;
             ctx.context = t.context;
             this.map[ctx.state].onEnter?.(ctx.context, game, (t, i) => this.onResolve(ctx, game, resolve, t, i));
@@ -68,7 +68,7 @@ export class LogicSequence<T, S> implements Logic<T, KeyValuePairOf<S>> {
     }
 
     onExit(ctx: KeyValuePairOf<S>, game: Game) {
-        this.map[ctx.state].onExit?.(ctx.context, game);
+        return this.map[ctx.state].onExit?.(ctx.context, game);
     }
 
     onInteraction(ctx: KeyValuePairOf<S>, game: Game, resolve: Resolve<T>, i: UserInteraction) {
@@ -85,7 +85,11 @@ export function or<T, C>(...as: Logic<T, C>[]): Logic<T, C> {
 
     return {
         onEnter()       { for (const f of es) f.onEnter(...arguments) },
-        onExit()        { for (const f of rs) f.onExit(...arguments) },
+        async onExit()  {
+            const a: Awaitable<void>[] = [];
+            for (const f of rs) a.push(f.onExit(...arguments))
+            await Promise.all(a);
+        },
         onInteraction() { for (const f of is) f.onInteraction(...arguments) },
     };
 }

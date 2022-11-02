@@ -269,7 +269,7 @@ export class MessageController implements Serializable<MessageSave> {
     }
 
     isMyInteraction(i: MessageComponentInteraction | ModalSubmitInteraction) {
-        return this.messages[i.channel!.id]?.msg === i.message;
+        return this.messages[i.channel!.id]?.msg.id === i.message?.id;
     }
 
 }

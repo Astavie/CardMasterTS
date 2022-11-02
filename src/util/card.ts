@@ -36,7 +36,7 @@ export function fillBlanks(card: string, blanks: (string | null)[]) {
     const copy = [...blanks];
     return card.replaceAll("\\_", () => {
         let card = copy.shift();
-        if (!card) return "\\_";
+        if (card === null || card === undefined) return "\\_";
 
         // rules to make the blank fit the sentence
         // final punctuation gets removed

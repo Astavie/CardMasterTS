@@ -76,6 +76,7 @@ export async function startGame(_: unknown, game: Game, setup: SetupContext, i?:
             content: 'You need at least two players to start.',
             ephemeral: true
         });
+        return null;
     }
 
     const whiteDeck: UnrealizedCard[] = [];
@@ -132,7 +133,7 @@ export async function startGame(_: unknown, game: Game, setup: SetupContext, i?:
 
     let ctx: RoundContext;
     if (setup['Rules'][1]) {
-        const playing: {[key:string]:string[]|null} = Object.fromEntries(game.players.map(player => [player, null]));
+        const playing: {[key:string]:string[]|null} = Object.fromEntries(game.players.map(player => [player.id, null]));
         delete playing[game.players[0].id];
         if (randoPlaying) {
             playing[randoId] = randoPlaying.map(getWhiteCard);

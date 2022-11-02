@@ -61,12 +61,12 @@ export const readLogic: Logic<void, RoundContext> = {
     onEnter(ctx, game) {
         game.updateMessage(p => message(ctx, game, p));
     },
-    onExit(_ctx, game) {
-        game.closeMessage();
+    async onExit(_ctx, game) {
+        await game.closeMessage();
     },
     onInteraction(ctx, game, resolve, i) {
         if (i.customId === '_join' || i.customId === '_leave') {
-            if (!i.replied) {
+            if (!i.replied && game.players.length >= 2) {
                 game.updateMessage(p => message(ctx, game, p), i);
             }
             return;
