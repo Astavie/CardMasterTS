@@ -39,14 +39,14 @@ export const setupLogic = new SetupLogic([{
     type: 'choice',
     name: 'Packs',
     values: packs.map(pack => ({ label: pack.name })),
-    default: [0],
+    default: eppgroep ? [0, 2, 3] : [0],
     min: 1,
     max: Number.MAX_SAFE_INTEGER,
 },{
     type: 'flags',
     name: 'Rules',
-    values: ['Rando Cardrissian', 'Quiplash Mode'],
-    default: [true, false],
+    values: ['Rando Cardrissian', 'Double or nothing', 'Quiplash mode'],
+    default: [true, true, false],
 },{
     type: 'number',
     name: 'Max points',
@@ -132,7 +132,7 @@ export async function startGame(_: unknown, game: Game, setup: SetupContext, i?:
     }
 
     let ctx: RoundContext;
-    if (setup['Rules'][1]) {
+    if (setup['Rules'][2]) {
         const playing: {[key:string]:string[]|null} = Object.fromEntries(game.players.map(player => [player.id, null]));
         delete playing[game.players[0].id];
         if (randoPlaying) {
@@ -168,6 +168,7 @@ export async function startGame(_: unknown, game: Game, setup: SetupContext, i?:
         }
         ctx = {
             quiplash: false,
+            doubleornothing: setup['Rules'][1] ? {} : undefined,
             handCards: setup['Hand cards'],
             maxPoints: setup['Max points'],
             czar: 0,

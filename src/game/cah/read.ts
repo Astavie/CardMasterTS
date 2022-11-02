@@ -1,18 +1,26 @@
-import { MessageActionRowOptions, User } from 'discord.js';
-import { bolden, fillBlanks } from '../../util/card';
+import { EmbedFieldData, MessageActionRowOptions, User } from 'discord.js';
+import { bolden, countBlanks, fillBlanks } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { Game, Logic } from '../logic';
 import { getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
 
 function message(ctx: RoundContext, game: Game, player: User | null): MessageOptions {
     const prompt = getBlackCard(ctx.prompt);
+    const blanks = countBlanks(prompt);
 
     const answers = ctx.shuffle.map((p, i) => {
         let answers: string[];
         if (ctx.quiplash) {
             answers = ctx.playing[p] as string[];
+        } else if (ctx.playing[p] === 'double') {
+            answers = ctx.doubleornothing![p].cards.map(getWhiteCard);
+            const missing = blanks - answers.length;
+            for (let i = 0; i < missing; i++) {
+                answers.push(answers[i]);
+            }
         } else {
-            answers = ctx.playing[p].map(i => getWhiteCard(ctx.hand[p][i!]));
+            answers = (ctx.playing[p] as (number | string)[])
+                .map(i => getWhiteCard(ctx.hand[p][i!]));
         }
 
         let answer = prompt;
@@ -74,26 +82,65 @@ export const readLogic: Logic<void, RoundContext> = {
 
         if (i.customId.startsWith('answer_')) {
             const prompt = getBlackCard(ctx.prompt);
+            const blanks = countBlanks(prompt);
             const winner = ctx.shuffle[parseInt(i.customId.substring(7))];
         
             let answers: string[];
             if (ctx.quiplash) {
                 answers = ctx.playing[winner] as string[];
+            } else if (ctx.playing[winner] === 'double') {
+                answers = ctx.doubleornothing![winner].cards.map(getWhiteCard);
+                const missing = blanks - answers.length;
+                for (let i = 0; i < missing; i++) {
+                    answers.push(answers[i]);
+                }
             } else {
-                answers = ctx.playing[winner].map(i => getWhiteCard(ctx.hand[winner][i!]));
+                answers = (ctx.playing[winner] as (number | null)[])
+                    .map(i => getWhiteCard(ctx.hand[winner][i!]));
             }
 
-            const answer = fillBlanks(prompt, answers);
-            ctx.points[winner] += 1;
+            const answer = `> ${fillBlanks(prompt, answers)}`;
 
-            // Send winner
-            game.sendAll({ embeds: [{ fields: [{
-                name: 'Round Winner',
-                value: `${winner === randoId ? '`Rando Cardrissian`' : `<@${winner}>`}\n${answer}`,
+            // award / lose points
+            ctx.points[winner] += 1;
+            if (!ctx.quiplash) for (const [player, playing] of Object.entries(ctx.playing)) {
+                if (playing === 'double') {
+                    if (player !== winner) ctx.points[player] -= 2 ** ctx.doubleornothing![player].amount;
+                    else                   ctx.points[player] += 2 ** ctx.doubleornothing![player].amount - 1;
+                }
+            }
+
+            function serializePlayer(id: string) {
+                return id === randoId ? '`Rando Cardrissian`' : `<@${id}>`;
+            }
+
+            const fields: EmbedFieldData[] = [{
+                name: 'Round winner',
+                value: `${serializePlayer(winner)}${!ctx.quiplash && ctx.playing[winner] === 'double' ? ` won ${ctx.doubleornothing![winner].amount ? (2 ** ctx.doubleornothing![winner].amount) + ' points' : '1 point'} with double or nothing!` : ''}\n\n${answer}`,
             },{
                 name: 'Points',
                 value: getPointsList(game.players, ctx.points, ctx.maxPoints),
-            }]}]});
+            }];
+
+            if (!ctx.quiplash) {
+                if (winner == randoId) {
+                    ctx.randoWon = true;
+                } else {
+                    delete ctx.randoWon;
+                }
+            }
+
+            if (!ctx.quiplash) {
+                const risks = Object.entries(ctx.playing)
+                    .filter(([player, playing]) => playing === 'double' && player !== winner)
+                    .map(([player, _]) => `${serializePlayer(player)} lost ${ctx.doubleornothing![player].amount ? (2 ** ctx.doubleornothing![player].amount) + ' points' : '1 point'}`)
+                    .join('\n');
+
+                if (risks) fields.push({ name: 'Risks taken', value: risks });
+            }
+
+            // Send winner
+            game.sendAll({ embeds: [{ fields }]});
             game.closeMessage(undefined, i).then(resolve);
         }
     },

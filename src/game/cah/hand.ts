@@ -1,4 +1,4 @@
-import { EmbedFieldData, MessageActionRowOptions, MessageComponentInteraction, ModalSubmitInteraction, User } from 'discord.js';
+import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowOptions, MessageButtonOptions, MessageComponentInteraction, ModalSubmitInteraction, User } from 'discord.js';
 import { countBlanks, escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { Game, Logic, Resolve } from '../logic';
@@ -22,18 +22,28 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
             const playing = ctx.playing[player.id];
             const hand = ctx.hand[player.id];
 
-            prompt = fillBlanks(prompt, playing.map(i => i !== null ? getWhiteCard(hand[i]) : null));
+            let cards: (string | null)[] = [];
+            if (playing === 'double') {
+                cards = ctx.doubleornothing![player.id].cards.map(getWhiteCard);
+                const missing = blanks - cards.length;
+                for (let i = 0; i < missing; i++) {
+                    cards.push(cards[i]);
+                }
+            } else {
+                cards = playing.map(i => i !== null ? getWhiteCard(hand[i]) : null);
+            }
+            prompt = fillBlanks(prompt, cards);
 
             fields.push({
                 name: 'Hand',
                 value: hand.map((c, i) => `\`${(i + 1).toString().padStart(2)}.\` ${getWhiteCard(c)}`).join('\n'),
             });
 
-            const playingStyle = !playing.includes(null) ? 'SUCCESS' : 'PRIMARY';
-            const disableUnplayed = !playing.includes(null) && blanks > 1;
+            const playingStyle    = (playing !== 'double' && !playing.includes(null)) ? 'SUCCESS' : 'PRIMARY';
+            const disableUnplayed = (playing !== 'double' && !playing.includes(null)) && blanks > 1;
 
             components.push(...createButtonGrid(ctx.handCards, i => ({
-                style: playing.includes(i) ? playingStyle : 'SECONDARY',
+                style: playing !== 'double' && playing.includes(i) ? playingStyle : 'SECONDARY',
                 label: (i + 1).toString(),
                 customId: `hand_${i}`,
                 disabled: disableUnplayed && !playing.includes(i),
@@ -73,14 +83,23 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
     });
 
     if (player) {
+        const buttons: (Required<BaseMessageComponentOptions> & MessageButtonOptions)[] = [{
+            type: 'BUTTON',
+            customId: '_leave',
+            style: 'DANGER',
+            label: 'Leave',
+        }];
+        if (player !== game.players[ctx.czar] && !ctx.quiplash && ctx.doubleornothing && player.id in ctx.doubleornothing) {
+            buttons.unshift({
+                type: 'BUTTON',
+                customId: 'double',
+                style: 'SECONDARY',
+                label: ('Double or nothing' + '!'.repeat(ctx.doubleornothing[player.id].amount)).substring(0, 80),
+            });
+        }
         components.push({
             type: 'ACTION_ROW',
-            components: [{
-                type: 'BUTTON',
-                customId: '_leave',
-                style: 'DANGER',
-                label: 'Leave',
-            }]
+            components: buttons,
         });
     }
 
@@ -110,13 +129,21 @@ export const handLogic: Logic<void, RoundContext> = {
                 resolveWhenPlayersDone(ctx, game, i, resolve);
             }
         } else if (!ctx.quiplash) {
-            if (i.customId.startsWith('hand_')) {
+            if (i.customId === 'double') {
+                ctx.playing[i.user.id] = 'double';
+                resolveWhenPlayersDone(ctx, game, i, resolve);
+            } else if (i.customId.startsWith('hand_')) {
                 const prompt = getBlackCard(ctx.prompt);
                 const blanks = countBlanks(prompt);
                 const hand = parseInt(i.customId.substring(5));
 
                 const player = i.user;
-                const playing = ctx.playing[player.id];
+                
+                if (ctx.playing[i.user.id] === 'double') {
+                    ctx.playing[i.user.id] = Array(blanks).fill(null);
+                }
+
+                const playing = ctx.playing[player.id] as (number | null)[];
                 const pindex = playing.indexOf(hand);
                 
                 let uindex = playing.indexOf(null);
@@ -178,7 +205,7 @@ function allPlayersDone(ctx: RoundContext): boolean {
     if (ctx.quiplash) {
         return Object.values(ctx.playing).every(p => p !== null);
     } else {
-        return Object.values(ctx.playing).every(p => !p.includes(null));
+        return Object.values(ctx.playing).every(p => p === 'double' || !p.includes(null));
     }
 }
 

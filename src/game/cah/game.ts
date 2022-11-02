@@ -1,6 +1,6 @@
 import { countBlanks } from '../../util/card';
 import { Game, Logic } from '../logic';
-import { Card, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
+import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
 export function prepareRound(ctx: GameContext, game: Game): null | void {
     // Check if someone won
@@ -39,8 +39,18 @@ export function prepareRound(ctx: GameContext, game: Game): null | void {
             const cards = ctx.context.hand[player];
             const hand: Card[] = [];
             for (let i = 0; i < ctx.context.handCards; i++) {
-                if (!playing.includes(i)) {
+                if (playing === 'double' || !playing.includes(i)) {
                     hand.push(cards[i]);
+                }
+            }
+            if (ctx.context.doubleornothing) {
+                if (playing !== 'double') {
+                    ctx.context.doubleornothing[player] = {
+                        cards: playing.map(i => (ctx.context as CardRoundContext).hand[player][i!]),
+                        amount: 0,
+                    };
+                } else {
+                    ctx.context.doubleornothing[player].amount += 1;
                 }
             }
             ctx.context.hand[player] = hand;
@@ -76,7 +86,18 @@ export function prepareRound(ctx: GameContext, game: Game): null | void {
     }
 
     // Set rando's cards
-    if (randoId in ctx.context.points) {
+    if (randoId in ctx.context.points && !(randoId in ctx.context.playing)) {
+        if (!ctx.context.quiplash && ctx.context.doubleornothing) {
+            const chance = ctx.context.randoWon ? 0.5 : 0.1;
+            if (Math.random() < chance) {
+                ctx.context.playing[randoId] = 'double';
+
+                // null = repeat
+                ctx.state = 'hand';
+                return null;
+            }
+        }
+
         const hand: Card[] = [];
         while (hand.length < blanks) {
             const card = ctx.context.whiteDeck.pop();

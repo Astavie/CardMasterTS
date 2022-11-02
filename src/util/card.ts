@@ -29,11 +29,17 @@ export function realizeCard(card: string, realizations: string[]) {
 }
 
 export function fillBlanks(card: string, blanks: (string | null)[]) {
-    if (!card.match(/\\_/gi)?.length) {
+    const n = card.match(/\\_/gi)?.length;
+
+    if (!n) {
         return `${card}\n> ${bolden(blanks.map(s => s ?? '\\_').join(' '))}`;
     }
 
     const copy = [...blanks];
+    if (copy.length > n) {
+        copy.push(copy.splice(n - 1, copy.length).join(' '));
+    }
+
     return card.replaceAll("\\_", () => {
         let card = copy.shift();
         if (card === null || card === undefined) return "\\_";

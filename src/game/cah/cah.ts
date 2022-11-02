@@ -84,7 +84,13 @@ export type CardRoundContext = BaseRoundContext & {
     quiplash: false,
     handCards: number,
     hand: {[key: string]: Card[] },
-    playing: {[key: string]: (number | null)[] },
+    playing: {[key: string]: (number | null)[] | 'double' },
+    
+    randoWon?: boolean,
+    doubleornothing?: {[key:string]: {
+        cards: Card[],
+        amount: number,
+    }},
 };
 
 export type QuiplashRoundContext = BaseRoundContext & {
