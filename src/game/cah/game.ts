@@ -49,8 +49,10 @@ export function prepareRound(ctx: GameContext, game: Game): null | void {
                         cards: playing.map(i => (ctx.context as CardRoundContext).hand[player][i!]),
                         amount: 0,
                     };
-                } else {
+                } else if (player === ctx.context.lastWinner) {
                     ctx.context.doubleornothing[player].amount += 1;
+                } else {
+                    ctx.context.doubleornothing[player].amount = 0;
                 }
             }
             ctx.context.hand[player] = hand;
@@ -88,7 +90,7 @@ export function prepareRound(ctx: GameContext, game: Game): null | void {
     // Set rando's cards
     if (randoId in ctx.context.points && !(randoId in ctx.context.playing)) {
         if (!ctx.context.quiplash && ctx.context.doubleornothing) {
-            const chance = ctx.context.randoWon ? 0.5 : 0.1;
+            const chance = ctx.context.lastWinner === randoId ? 0.33 : 0.05;
             if (Math.random() < chance) {
                 ctx.context.playing[randoId] = 'double';
 

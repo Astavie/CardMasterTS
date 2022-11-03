@@ -2,7 +2,7 @@ import { randomInt } from "crypto";
 import { User } from "discord.js";
 import { countRealizations, realizeCard } from "../../util/card";
 import { GameType } from "../game";
-import { ContextOf, forward, Logic, LogicMap, LogicSequence, loop, next, or, then } from "../logic";
+import { ContextOf, forward, LogicMap, LogicSequence, loop, next, or } from "../logic";
 import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
@@ -86,7 +86,7 @@ export type CardRoundContext = BaseRoundContext & {
     hand: {[key: string]: Card[] },
     playing: {[key: string]: (number | null)[] | 'double' },
     
-    randoWon?: boolean,
+    lastWinner?: string,
     doubleornothing?: {[key:string]: {
         cards: Card[],
         amount: number,

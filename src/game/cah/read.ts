@@ -101,45 +101,39 @@ export const readLogic: Logic<void, RoundContext> = {
 
             const answer = `> ${fillBlanks(prompt, answers)}`;
 
-            // award / lose points
-            ctx.points[winner] += 1;
-            if (!ctx.quiplash) for (const [player, playing] of Object.entries(ctx.playing)) {
-                if (playing === 'double') {
-                    if (player !== winner) ctx.points[player] -= 2 ** ctx.doubleornothing![player].amount;
-                    else                   ctx.points[player] += 2 ** ctx.doubleornothing![player].amount - 1;
-                }
-            }
-
             function serializePlayer(id: string) {
                 return id === randoId ? '`Rando Cardrissian`' : `<@${id}>`;
             }
 
+            // award / lose points
+            ctx.points[winner] += 1;
+            if (!ctx.quiplash) for (const [player, playing] of Object.entries(ctx.playing)) {
+                if (playing === 'double' && player !== winner) {
+                    ctx.points[player] -= 1 + ctx.doubleornothing![player].amount;
+                }
+            }
+            
             const fields: EmbedFieldData[] = [{
                 name: 'Round winner',
-                value: `${serializePlayer(winner)}${!ctx.quiplash && ctx.playing[winner] === 'double' ? ` won ${ctx.doubleornothing![winner].amount ? (2 ** ctx.doubleornothing![winner].amount) + ' points' : '1 point'} with double or nothing!` : ''}\n\n${answer}`,
+                value: `${serializePlayer(winner)}\n\n${answer}`,
             },{
                 name: 'Points',
                 value: getPointsList(game.players, ctx.points, ctx.maxPoints),
             }];
 
             if (!ctx.quiplash) {
-                if (winner == randoId) {
-                    ctx.randoWon = true;
-                } else {
-                    delete ctx.randoWon;
-                }
-            }
-
-            if (!ctx.quiplash) {
                 const risks = Object.entries(ctx.playing)
                     .filter(([player, playing]) => playing === 'double' && player !== winner)
-                    .map(([player, _]) => `${serializePlayer(player)} lost ${ctx.doubleornothing![player].amount ? (2 ** ctx.doubleornothing![player].amount) + ' points' : '1 point'}`)
+                    .map(([player, _]) => `${serializePlayer(player)} lost ${ctx.doubleornothing![player].amount ? (1 + ctx.doubleornothing![player].amount) + ' points' : '1 point'}`)
                     .join('\n');
 
                 if (risks) fields.push({ name: 'Risks taken', value: risks });
             }
 
-            // Send winner
+            // continue
+            if (!ctx.quiplash) {
+                ctx.lastWinner = winner;
+            }
             game.sendAll({ embeds: [{ fields }]});
             game.closeMessage(undefined, i).then(resolve);
         }

@@ -38,6 +38,11 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
                 name: 'Hand',
                 value: hand.map((c, i) => `\`${(i + 1).toString().padStart(2)}.\` ${getWhiteCard(c)}`).join('\n'),
             });
+ 
+            if (ctx.doubleornothing && player.id in ctx.doubleornothing) fields.push({
+                name: 'Last cards played',
+                value: ctx.doubleornothing[player.id].cards.map(getWhiteCard).join('\n'),
+            })
 
             const playingStyle    = (playing !== 'double' && !playing.includes(null)) ? 'SUCCESS' : 'PRIMARY';
             const disableUnplayed = (playing !== 'double' && !playing.includes(null)) && blanks > 1;
@@ -93,8 +98,8 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
             buttons.unshift({
                 type: 'BUTTON',
                 customId: 'double',
-                style: 'SECONDARY',
-                label: ('Double or nothing' + '!'.repeat(ctx.doubleornothing[player.id].amount)).substring(0, 80),
+                style: ctx.playing[player.id] === 'double' ? 'SUCCESS' : 'SECONDARY',
+                label: 'Double or nothing' + '!'.repeat(ctx.doubleornothing[player.id].amount),
             });
         }
         components.push({
@@ -130,8 +135,15 @@ export const handLogic: Logic<void, RoundContext> = {
             }
         } else if (!ctx.quiplash) {
             if (i.customId === 'double') {
-                ctx.playing[i.user.id] = 'double';
-                resolveWhenPlayersDone(ctx, game, i, resolve);
+                if (ctx.playing[i.user.id] === 'double') {
+                    const prompt = getBlackCard(ctx.prompt);
+                    const blanks = countBlanks(prompt);
+                    ctx.playing[i.user.id] = Array(blanks).fill(null)
+                    game.updateMessage(p => message(ctx, game, p), i);
+                } else {
+                    ctx.playing[i.user.id] = 'double';
+                    resolveWhenPlayersDone(ctx, game, i, resolve);
+                }
             } else if (i.customId.startsWith('hand_')) {
                 const prompt = getBlackCard(ctx.prompt);
                 const blanks = countBlanks(prompt);
