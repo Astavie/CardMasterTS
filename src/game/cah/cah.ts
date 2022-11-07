@@ -2,11 +2,11 @@ import { randomInt } from "crypto";
 import { User } from "discord.js";
 import { countRealizations, realizeCard } from "../../util/card";
 import { GameType } from "../game";
-import { ContextOf, forward, LogicMap, LogicSequence, loop, next, or } from "../logic";
+import { ContextOf, forward, LogicMap, LogicSequence, loop, next, or, then } from "../logic";
 import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
-import { packs, SetupContext, setupLogic, startGame } from "./setup";
+import { CAHSetupContext, packs, setupLogic } from "./setup";
 
 export type Card = [number, number, string[]]; // [pack, card, realizations]
 export type UnrealizedCard = Card | [number, number]; // [pack, card]
@@ -111,16 +111,16 @@ export type GameContext = ContextOf<typeof roundLogic>;
 // -- game logic --
 let gameLogic =
     or(
-        loop(
+        loop(then(
             or(joinLeaveLogic, roundLogic),
-            prepareRound,
-        ),
+            prepareRound
+        )),
         gameResultLogic
     ); // first add/remove players, then further game logic
 
 // -- global logic --
-const globalMap: LogicMap<void, { 'setup': Partial<SetupContext>, 'game': GameContext }> = {
-    setup: forward(loop(setupLogic, startGame), 'game'),
+const globalMap: LogicMap<void, { 'setup': Partial<CAHSetupContext>, 'game': GameContext }> = {
+    setup: forward(setupLogic, 'game'),
     game:  gameLogic,
 }
 

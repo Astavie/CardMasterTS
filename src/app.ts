@@ -101,20 +101,20 @@ client.on('interactionCreate', interaction => {
 // Login to Discord with your client's token
 client.login(process.env.TOKEN);
 
-// process.on("exit", () => {
-//     db.remove({}, () => {
-//         db.insert(games.map(g => g.save()), () => {
-//             console.log("Saved games");
-//         });
-//     });
-// });
-//
-// process.on('SIGINT', () => {
-//     db.remove({}, () => {
-//         db.insert(games.map(g => g.save()), () => {
-//             console.log("Saved games");
-//             process.exit();
-//         });
-//     });
-// });
-//
+process.on("exit", () => {
+    db.remove({}, () => {
+        db.insert(games.map(g => g.save()), () => {
+            console.log("Saved games");
+        });
+    });
+});
+
+process.on('SIGINT', () => {
+    db.remove({}, () => {
+        db.insert(games.map(g => g.save()), () => {
+            console.log("Saved games");
+            process.exit();
+        });
+    });
+});
+

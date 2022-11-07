@@ -1,6 +1,7 @@
-import { CommandInteraction, EmojiIdentifierResolvable, MessageActionRowOptions, MessageEmbedOptions } from 'discord.js'
+import { Awaitable } from '@discordjs/builders';
+import { ButtonInteraction, EmojiIdentifierResolvable, MessageActionRowOptions, MessageEmbedOptions, SelectMenuInteraction } from 'discord.js'
 import { MessageOptions } from '../util/message'
-import { Game, Logic, Resolve, UserInteraction } from './logic'
+import { Event, FullContext, Logic, Resolve } from './logic'
 
 export type Arg = Flags | MultiChoice | Number;
 
@@ -52,31 +53,36 @@ type UnionToIntersection<U> =
 
 export type SetupContext<T extends readonly Arg[]> = UnionToIntersection<ToObjectsArray<T>[number]>;
 
-export type SetupMessageGenerator<A extends readonly Arg[]> = (ctx: SetupContext<A>, game: Game) => MessageEmbedOptions;
+export type SetupMessageGenerator<A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>) => MessageEmbedOptions;
 
-function defaultMessageGenerator(_: unknown, game: Game): MessageEmbedOptions {
+export type GameStarter<T, A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>, i: ButtonInteraction) => Awaitable<T | null>
+
+function defaultMessageGenerator({ players }: FullContext<unknown>): MessageEmbedOptions {
     return {
         fields: [{
             name: 'Players',
-            value: game.players.map(p => p.toString()).join('\n') || '*None.*'
+            value: players.map(p => p.toString()).join('\n') || '*None.*'
         }]
     };
 }
 
-export class SetupLogic<A extends readonly Arg[]> implements Logic<SetupContext<A>, Partial<SetupContext<A>>> {
+export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, Partial<SetupContext<A>>> {
 
     args: A;
     generator: SetupMessageGenerator<A>;
+    starter: GameStarter<T, A>;
 
-    constructor(args: A, generator: SetupMessageGenerator<A> = defaultMessageGenerator) {
+    constructor(args: A, starter: GameStarter<T, A>, generator: SetupMessageGenerator<A> = defaultMessageGenerator) {
         this.args = args;
         this.generator = generator;
+        this.starter = starter;
     }
 
-    _message(ctx: SetupContext<A>, game: Game): MessageOptions {
-        const embeds = [this.generator(ctx, game)];
+    message(full: FullContext<SetupContext<A>>): MessageOptions {
+        const embeds = [this.generator(full)];
         const components: (Required<MessageActionRowOptions>)[] = [];
-        
+        const ctx = full.ctx;
+
         for (const arg of this.args) {
             const row: Required<MessageActionRowOptions> = {
                 type: 'ACTION_ROW',
@@ -153,6 +159,11 @@ export class SetupLogic<A extends readonly Arg[]> implements Logic<SetupContext<
                 customId: '_start',
                 label: 'Start',
                 style: 'PRIMARY',
+            },{
+                type: 'BUTTON',
+                customId: '_close',
+                label: 'Close',
+                style: 'PRIMARY',
             }],
         });
 
@@ -163,71 +174,79 @@ export class SetupLogic<A extends readonly Arg[]> implements Logic<SetupContext<
         };
     }
 
-    onEnter(ctx: Partial<SetupContext<A>>, game: Game, _: Resolve<SetupContext<A>>, i?: CommandInteraction) {
-        for (const arg of this.args) {
-            if (!ctx[arg.name]) ctx[arg.name] = arg.default;
-        }
-        game.updateLobby(this._message(ctx as SetupContext<A>, game), i);
-    }
+    onEvent(_full: FullContext<Partial<SetupContext<A>>>, event: Event, resolve: Resolve<T | null>): void {
+        const full = _full as FullContext<SetupContext<A>>;
+        const { ctx, game } = full;
 
-    onInteraction(ctx: Partial<SetupContext<A>>, game: Game, resolve: Resolve<SetupContext<A>>, i: UserInteraction) {
-        switch (i.customId) {
-        case '_join':
-            if (game.players.indexOf(i.user) !== -1) {
-                i.reply({
-                    content: 'You have already joined!',
-                    ephemeral: true
-                });
+        switch (event.type) {
+        case 'start':
+            for (const arg of this.args) {
+                if (!ctx[arg.name]) ctx[arg.name] = arg.default;
+            }
+            game.updateLobby(this.message(full), event.interaction);
+            break;
+        case 'interaction':
+            switch (event.interaction.customId) {
+            case '_close':
+                game.closeLobby(undefined, event.interaction);
+                resolve(null);
+                return;
+            case '_join':
+                if (game.addPlayer(event.interaction.user)) {
+                    game.updateLobby(this.message(full), event.interaction);
+                } else {
+                    event.interaction.reply({
+                        content: 'You have already joined!',
+                        ephemeral: true
+                    });
+                }
+                return;
+            case '_leave':
+                if (game.removePlayer(event.interaction.user)) {
+                    game.updateLobby(this.message(full), event.interaction);
+                } else {
+                    event.interaction.reply({ content: 'You have not even joined!', ephemeral: true });
+                }
+                return;
+            case '_start':
+                (async () => {
+                    const t = await this.starter(full, event.interaction as ButtonInteraction);
+                    if (t !== null) resolve(t);
+                })();
                 return;
             }
 
-            game.players.push(i.user);
-            game.updateLobby(this._message(ctx as SetupContext<A>, game), i);
-            return;
-        case '_leave':
-            const index = game.players.indexOf(i.user);
-            if (index === -1) {
-                i.reply({ content: 'You have not even joined!', ephemeral: true });
-                return;
-            }
+            const arg = this.args.find(arg => event.interaction.customId.startsWith(`_${arg.name}_`));
+            if (!arg) return;
 
-            game.players.splice(index, 1);
-            game.updateLobby(this._message(ctx as SetupContext<A>, game), i);
-            return;
-        case '_start':
-            resolve(ctx as SetupContext<A>, i);
-            return;
-        }
-
-        const arg = this.args.find(arg => i.customId.startsWith(`_${arg.name}_`));
-        if (!arg) return;
-
-        switch (arg.type) {
-        case 'flags':
-            const num = parseInt(i.customId.substring(arg.name.length + 2));
-            const flags = ctx[arg.name] as boolean[];
-            flags[num] = !flags[num];
-            break;
-        case 'number':
-            const end = i.customId.substring(i.customId.length - 3);
-            switch (end) {
-            case 'inc':
-                if (ctx[arg.name] < arg.max) (ctx[arg.name] as number) += 1;
+            switch (arg.type) {
+            case 'flags':
+                const num = parseInt(event.interaction.customId.substring(arg.name.length + 2));
+                const flags = ctx[arg.name] as boolean[];
+                flags[num] = !flags[num];
                 break;
-            case 'dec':
-                if (ctx[arg.name] > arg.min) (ctx[arg.name] as number) -= 1;
+            case 'number':
+                const end = event.interaction.customId.substring(event.interaction.customId.length - 3);
+                switch (end) {
+                case 'inc':
+                    if (ctx[arg.name] < arg.max) (ctx[arg.name] as number) += 1;
+                    break;
+                case 'dec':
+                    if (ctx[arg.name] > arg.min) (ctx[arg.name] as number) -= 1;
+                    break;
+                case 'def':
+                    (ctx[arg.name] as number) = arg.default;
+                    break;
+                }
                 break;
-            case 'def':
-                (ctx[arg.name] as number) = arg.default;
+            case 'choice':
+                (ctx[arg.name] as number[]) = (event.interaction as SelectMenuInteraction).values.map(value => parseInt(value));
                 break;
             }
-            break;
-        case 'choice':
-            if (i.isSelectMenu()) (ctx[arg.name] as number[]) = i.values.map(value => parseInt(value));
+            
+            game.updateLobby(this.message(full));
             break;
         }
-        
-        game.updateLobby(this._message(ctx as SetupContext<A>, game), i);
     }
 
 }

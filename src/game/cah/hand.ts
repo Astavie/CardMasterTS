@@ -1,10 +1,10 @@
 import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowOptions, MessageButtonOptions, MessageComponentInteraction, ModalSubmitInteraction, User } from 'discord.js';
 import { countBlanks, escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
-import { Game, Logic, Resolve } from '../logic';
+import { FullContext, Logic, Resolve } from '../logic';
 import { getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
 
-function message(ctx: RoundContext, game: Game, player: User | null): MessageOptions {
+function message({ ctx, players }: FullContext<RoundContext>, player: User | null): MessageOptions {
     let prompt = getBlackCard(ctx.prompt);
     const blanks = countBlanks(prompt);
     
@@ -13,9 +13,9 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
 
     const allPlaying = Object.entries(ctx.playing).filter(([k, _v]) => k !== randoId).map(([_k, v]) => v);
     const playedCards = ctx.quiplash ? allPlaying.filter(p => p !== null).length : allPlaying.filter(p => !p.includes(null)).length;
-    const totalPlayers = game.players.length - 1;
+    const totalPlayers = players.length - 1;
 
-    if (player && player !== game.players[ctx.czar]) {
+    if (player && player !== players[ctx.czar]) {
 
         if (!ctx.quiplash) {
 
@@ -79,7 +79,7 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
     }
 
     prompt = `> ${prompt}`;
-    prompt = `Card Czar: ${game.players[ctx.czar]}\n\n${prompt}`;
+    prompt = `Card Czar: ${players[ctx.czar]}\n\n${prompt}`;
     prompt = `${prompt}\n\n*${playedCards}/${totalPlayers} players have selected ${blanks === 1 ? 'a card' : 'their cards'}.*`;
 
     fields.unshift({
@@ -94,7 +94,7 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
             style: 'DANGER',
             label: 'Leave',
         }];
-        if (player !== game.players[ctx.czar] && !ctx.quiplash && ctx.doubleornothing && player.id in ctx.doubleornothing) {
+        if (player !== players[ctx.czar] && !ctx.quiplash && ctx.doubleornothing && player.id in ctx.doubleornothing) {
             buttons.unshift({
                 type: 'BUTTON',
                 customId: 'double',
@@ -116,98 +116,103 @@ function message(ctx: RoundContext, game: Game, player: User | null): MessageOpt
 }
 
 export const handLogic: Logic<void, RoundContext> = {
-    onEnter(ctx, game) {
-        game.updateMessage(p => message(ctx, game, p));
-    },
-    async onExit(_ctx, game) {
+    async onExit({ game, players }) {
         // do not close spectator message
-        await game.closeMessage(undefined, undefined, u => u !== null);
+        await game.closeMessage(players, undefined, undefined, false);
     },
-    onInteraction(ctx, game, resolve, i) {
-        if (i.customId === '_join') {
-            if (!i.replied) {
-                game.updateMessage(p => message(ctx, game, p), i);
+    onEvent(full, event, resolve) {
+        const { ctx, players, game } = full;
+        switch (event.type) {
+        case 'update':
+            game.updateMessage(players, p => message(full, p));
+        break;
+        case 'add':
+            game.updateMessage(players, p => message(full, p), event.interaction);
+        break;
+        case 'remove':
+            if (players.length > 2) {
+                resolveWhenPlayersDone(full, event.interaction, resolve);
             }
-        } else if (i.customId === '_leave') {
-            if (!i.replied && game.players.length >= 2) {
-                // When someone leaves, do a quick check if the rest of the players are done
-                resolveWhenPlayersDone(ctx, game, i, resolve);
-            }
-        } else if (!ctx.quiplash) {
-            if (i.customId === 'double') {
-                if (ctx.playing[i.user.id] === 'double') {
-                    const prompt = getBlackCard(ctx.prompt);
-                    const blanks = countBlanks(prompt);
-                    ctx.playing[i.user.id] = Array(blanks).fill(null)
-                    game.updateMessage(p => message(ctx, game, p), i);
-                } else {
-                    ctx.playing[i.user.id] = 'double';
-                    resolveWhenPlayersDone(ctx, game, i, resolve);
-                }
-            } else if (i.customId.startsWith('hand_')) {
-                const prompt = getBlackCard(ctx.prompt);
-                const blanks = countBlanks(prompt);
-                const hand = parseInt(i.customId.substring(5));
-
-                const player = i.user;
-                
-                if (ctx.playing[i.user.id] === 'double') {
-                    ctx.playing[i.user.id] = Array(blanks).fill(null);
-                }
-
-                const playing = ctx.playing[player.id] as (number | null)[];
-                const pindex = playing.indexOf(hand);
-                
-                let uindex = playing.indexOf(null);
-
-                if (pindex === -1) {
-                    if (uindex === -1) {
-                        if (blanks === 1) uindex = 0;
-                        else return;
-                    }
-                    playing[uindex] = hand;
-
-                    if (playing.indexOf(null) === -1) {
-                        resolveWhenPlayersDone(ctx, game, i, resolve);
-                    } else {
-                        game.updateMessage(message(ctx, game, player), i);
-                    }
-                } else {
-                    playing[pindex] = null;
-                    
-                    if (uindex === -1) {
-                        game.updateMessage(p => message(ctx, game, p), i);
-                    } else {
-                        game.updateMessage(message(ctx, game, player), i);
-                    }
-                }
-            }
-        } else {
-            if (i.isButton()) {
-                if (i.customId === 'fill') {
-                    fillModal(getBlackCard(ctx.prompt), i);
-                } else if (i.customId === 'random') {
-                    if (ctx.playing[i.user.id] === 'random') {
-                        ctx.playing[i.user.id] = null;
-                        game.updateMessage(p => message(ctx, game, p), i);
-                    } else {
+        break;
+        case 'interaction':
+            const i = event.interaction;
+            if (!ctx.quiplash) {
+                if (i.customId === 'double') {
+                    if (ctx.playing[i.user.id] === 'double') {
                         const prompt = getBlackCard(ctx.prompt);
                         const blanks = countBlanks(prompt);
+                        ctx.playing[i.user.id] = Array(blanks).fill(null)
+                        game.updateMessage(players, p => message(full, p), i);
+                    } else {
+                        ctx.playing[i.user.id] = 'double';
+                        resolveWhenPlayersDone(full, i, resolve);
+                    }
+                } else if (i.customId.startsWith('hand_')) {
+                    const prompt = getBlackCard(ctx.prompt);
+                    const blanks = countBlanks(prompt);
+                    const hand = parseInt(i.customId.substring(5));
 
-                        const count = Object.values(ctx.playing).filter(p => p === 'random').length + 1;
-                        if (count * blanks > ctx.whiteDeck.length) {
-                            i.reply({ content: 'There are not enough white cards left for this option!', ephemeral: true });
-                            return;
+                    const player = i.user;
+                    
+                    if (ctx.playing[i.user.id] === 'double') {
+                        ctx.playing[i.user.id] = Array(blanks).fill(null);
+                    }
+
+                    const playing = ctx.playing[player.id] as (number | null)[];
+                    const pindex = playing.indexOf(hand);
+                    
+                    let uindex = playing.indexOf(null);
+
+                    if (pindex === -1) {
+                        if (uindex === -1) {
+                            if (blanks === 1) uindex = 0;
+                            else return;
                         }
+                        playing[uindex] = hand;
 
-                        ctx.playing[i.user.id] = 'random';
-                        resolveWhenPlayersDone(ctx, game, i, resolve);
+                        if (playing.indexOf(null) === -1) {
+                            resolveWhenPlayersDone(full, i, resolve);
+                        } else {
+                            game.updateMessage([player], message(full, player), i);
+                        }
+                    } else {
+                        playing[pindex] = null;
+                        
+                        if (uindex === -1) {
+                            game.updateMessage(players, p => message(full, p), i);
+                        } else {
+                            game.updateMessage([player], message(full, player), i);
+                        }
                     }
                 }
-            } else if (i.isModalSubmit() && i.customId === 'fill_modal') {
-                ctx.playing[i.user.id] = i.components.map(c => escapeDiscord(c.components[0].value));
-                resolveWhenPlayersDone(ctx, game, i, resolve);
+            } else {
+                if (i.isButton()) {
+                    if (i.customId === 'fill') {
+                        fillModal(getBlackCard(ctx.prompt), i);
+                    } else if (i.customId === 'random') {
+                        if (ctx.playing[i.user.id] === 'random') {
+                            ctx.playing[i.user.id] = null;
+                            game.updateMessage(players, p => message(full, p), i);
+                        } else {
+                            const prompt = getBlackCard(ctx.prompt);
+                            const blanks = countBlanks(prompt);
+
+                            const count = Object.values(ctx.playing).filter(p => p === 'random').length + 1;
+                            if (count * blanks > ctx.whiteDeck.length) {
+                                i.reply({ content: 'There are not enough white cards left for this option!', ephemeral: true });
+                                return;
+                            }
+
+                            ctx.playing[i.user.id] = 'random';
+                            resolveWhenPlayersDone(full, i, resolve);
+                        }
+                    }
+                } else if (i.isModalSubmit() && i.customId === 'fill_modal') {
+                    ctx.playing[i.user.id] = (i as ModalSubmitInteraction).components.map(c => escapeDiscord(c.components[0].value));
+                    resolveWhenPlayersDone(full, i, resolve);
+                }
             }
+        break;
         }
     },
 
@@ -221,7 +226,8 @@ function allPlayersDone(ctx: RoundContext): boolean {
     }
 }
 
-function resolveWhenPlayersDone(ctx: RoundContext, game: Game, i: MessageComponentInteraction | ModalSubmitInteraction, resolve: Resolve<void>) {
+function resolveWhenPlayersDone(full: FullContext<RoundContext>, i: MessageComponentInteraction | ModalSubmitInteraction | undefined, resolve: Resolve<void>) {
+    const { game, ctx, players } = full;
     if (allPlayersDone(ctx)) {
         // put random cards in
         if (ctx.quiplash) {
@@ -231,7 +237,7 @@ function resolveWhenPlayersDone(ctx: RoundContext, game: Game, i: MessageCompone
                 if (ctx.playing[player] === 'random') {
                     const cards: string[] = [];
                     while (cards.length < blanks) {
-                        cards.push(getWhiteCard(realizeWhiteCard(ctx.whiteDeck.pop()!, game.players)));
+                        cards.push(getWhiteCard(realizeWhiteCard(ctx.whiteDeck.pop()!, players)));
                     }
                     ctx.playing[player] = cards;
                 }
@@ -242,9 +248,9 @@ function resolveWhenPlayersDone(ctx: RoundContext, game: Game, i: MessageCompone
         ctx.shuffle = shuffle(Object.keys(ctx.playing));
 
         // next part!
-        game.closeMessage(p => message(ctx, game, p), i, u => u !== null).then(resolve);
+        game.closeMessage(players, p => message(full, p), i, false).then(resolve);
     } else {
-        game.updateMessage(p => message(ctx, game, p), i);
+        game.updateMessage(players, p => message(full, p), i);
     }
 }
 

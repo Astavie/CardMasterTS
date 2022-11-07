@@ -1,8 +1,9 @@
-import { Client, ColorResolvable, CommandInteraction, Message, Snowflake, TextBasedChannel, User } from "discord.js";
+import assert from "assert";
+import { Client, ColorResolvable, CommandInteraction, Message, MessageEmbedOptions, Snowflake, TextBasedChannel, User } from "discord.js";
 import { disableButtons, MessageController, MessageOptions, MessageSave } from "../util/message";
 import { Serializable } from "../util/saving";
 import { CAH } from "./cah/cah";
-import { Game, Logic, MessageGenerator, UserInteraction } from "./logic";
+import { Event, Game, Logic, MessageGenerator, UserInteraction } from "./logic";
 
 // Games
 export const games: GameImpl<unknown>[] = [];
@@ -83,16 +84,37 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
     start(i: CommandInteraction) {
         games.push(this);
-        this.type.logic.onEnter?.(this.context, this, () => this.end(), i);
+        this.onEvent({ type: 'start', interaction: i });
     }
 
     end() {
-        this.type.logic.onExit?.(this.context, this);
+        this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players });
         games.splice(games.indexOf(this), 1);
 
         if (this.lobby && this.lobby.isThread() && this.lobby.ownerId === process.env.CLIENT_ID) {
             this.lobby.setArchived(true, 'Game ended.');
         }
+    }
+
+    onEvent(event: Event) {
+        this.type.logic.onEvent?.({ ctx: this.context, game: this, players: this.players }, event, () => this.end());
+    }
+
+    addPlayer(player: User, i?: UserInteraction): boolean {
+        if (this.players.indexOf(player) !== -1) return false;
+        
+        this.players.push(player);
+        this.onEvent({ type: 'add', player, interaction: i });
+        return true;
+    }
+
+    removePlayer(player: User, i?: UserInteraction): boolean {
+        const idx = this.players.indexOf(player);
+        if (idx === -1) return false;
+
+        this.players.splice(idx, 1);
+        this.onEvent({ type: 'remove', player, interaction: i });
+        return true;
     }
 
     async allowSpectators(): Promise<void> {
@@ -110,58 +132,38 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         if (i.isButton() && (i.customId === '_prevpage' || i.customId === '_nextpage')) {
             this.stateMessage.flipPage(i);
         } else {
-            this.type.logic.onInteraction?.(this.context, this, () => this.end(), i);
+            this.onEvent({ type: 'interaction', interaction: i });
         }
     }
 
-    async sendSpectators(message: Partial<MessageOptions>): Promise<void> {
-        for (const embed of message.embeds ?? []) embed.color ??= this.type.color;
-        await this.lobby?.send(message);
-    }
-
-    async sendPlayers(message: Partial<MessageOptions>): Promise<void> {
-        for (const embed of message.embeds ?? []) embed.color ??= this.type.color;
-
+    async send(players: User[], message: MessageGenerator | MessageOptions, sendSpectators = true): Promise<void> {
         const promises: Promise<Message>[] = [];
-        for (const player of this.players) {
+
+        const generator = typeof message === 'function' ? message : () => message;
+        const generator2: MessageGenerator = user => {
+            const m = generator(user);
+            if (m.embeds)
+                for (const embed of m.embeds)
+                    embed.color ??= this.type.color;
+            return m;
+        }
+
+        if (sendSpectators) {
+            const p = this.lobby?.send(generator2(null));
+            if (p) promises.push(p)
+        }
+
+        for (const player of players) {
             promises.push(
-                player.createDM().then(dm => dm.send(message))
+                player.createDM().then(dm => dm.send(generator2(player)))
             );
-        }
-        await Promise.all(promises);
-    }
-
-    async sendAll(message: Partial<MessageOptions>): Promise<void> {
-        await Promise.all([
-            this.sendSpectators(message),
-            this.sendPlayers(message)
-        ]);
-    }
-
-    async send(message: (user: User | null) => Partial<MessageOptions> | null): Promise<void> {
-        const promises: Promise<Message>[] = [];
-        
-        if (this.lobby) {
-            const msg = message(null);
-            if (msg) {
-                for (const embed of msg.embeds ?? []) embed.color ??= this.type.color;
-                promises.push(this.lobby.send(msg));
-            }
-        }
-
-        for (const player of this.players) {
-            const msg = message(player);
-            if (msg) {
-                for (const embed of msg.embeds ?? []) embed.color ??= this.type.color;
-                promises.push(player.createDM().then(dm => dm.send(msg)));
-            }
         }
 
         await Promise.all(promises);
     }
 
     async updateLobby(message: MessageOptions, i?: UserInteraction | CommandInteraction): Promise<void> {
-        for (const embed of message.embeds) {
+        if (message.embeds) for (const embed of message.embeds) {
             embed.title ??= this.type.name;
             embed.color ??= this.type.color;
         }
@@ -172,101 +174,97 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         );
     }
 
-    async closeLobby(i?: UserInteraction, exceptions?: string[]): Promise<void> {
-        const msg = Object.values(this.lobbyMessage.messages)[0].msg;
+    async closeLobby(message?: MessageOptions, i?: UserInteraction, keepButtons?: string[]): Promise<void> {
+        const lobbyMsg = Object.values(this.lobbyMessage.messages)[0].msg;
+        const msg = message ?? lobbyMsg;
         const options = {
             embeds: msg.embeds,
-            components: disableButtons(msg.components, exceptions),
+            components: msg.components && disableButtons(msg.components, keepButtons),
         };
         if (i) {
             await i.update(options);
         } else {
-            await msg.edit(options);
+            await lobbyMsg.edit(options);
         }
     }
 
-    async updateMessage(message: MessageOptions | MessageGenerator, i?: UserInteraction): Promise<void> {
-        if (typeof message === 'function') {
-            const promises: Promise<void>[] = [];
-
-            if (this.lobby) {
-                const msg = message(null);
-                if (msg) {
-                    for (const embed of msg.embeds) {
-                        embed.title ??= this.type.name;
-                        embed.color ??= this.type.color;
-                    }
-                    promises.push(this.stateMessage.send(
-                        this.lobby,
-                        msg, 
-                        i?.channel === this.lobby ? i : undefined
-                    ));
-                }
-            }
-
-            for (const player of this.players) {
-                const msg = message(player);
-                if (msg) {
-                    for (const embed of msg.embeds) {
-                        embed.title ??= this.type.name;
-                        embed.color ??= this.type.color;
-                    }
-                    promises.push(player.createDM().then(dm => this.stateMessage.send(
-                        dm,
-                        msg,
-                        i?.channel === dm ? i : undefined
-                    )));
-                }
-            }
-
-            await Promise.all(promises);
-        } else {
-            for (const embed of message.embeds) {
-                embed.title ??= this.type.name;
-                embed.color ??= this.type.color;
-            }
-            await this.stateMessage.send(i!.channel!, message, i);
-        }
-    }
-
-    async closeMessage(message?: MessageGenerator, i?: UserInteraction, filter: (user: User | null) => boolean = () => true): Promise<void> {
-        const promises: Promise<unknown>[] = [];
-
-        for (const obj of Object.values(this.stateMessage.messages)) {
-            const channel = obj.msg.channel;
-            const user = channel.type === "DM" ? channel.recipient : null;
-            if (!filter(user)) continue;
-
-            const msg = message?.(user);
-
-            if (msg) {
-                for (const embed of msg.embeds) {
+    async updateMessage(players: User[], message: MessageOptions | MessageGenerator, i?: UserInteraction, sendSpectators = true): Promise<void> {
+        const promises: Promise<void>[] = [];
+        
+        const generator = typeof message === 'function' ? message : () => message;
+        const generator2: MessageGenerator = user => {
+            const m = generator(user);
+            if (m.embeds) {
+                for (const embed of m.embeds) {
                     embed.title ??= this.type.name;
                     embed.color ??= this.type.color;
                 }
-                const options = {
-                    embeds: msg.embeds,
-                    components: disableButtons(msg.components),
-                    forceList: false,
-                };
-                promises.push(this.stateMessage.send(
-                    channel,
-                    options,
-                    i?.channel === channel ? i : undefined,
-                ));
-            } else {
-                const options = {
-                    embeds: obj.msg.embeds,
-                    components: disableButtons(obj.msg.components),
-                };
-                if (i?.channel === channel) {
-                    promises.push(i.update(options));
-                } else {
-                    promises.push(obj.msg.edit(options));
-                }
             }
+            return m;
+        }
 
-            delete this.stateMessage.messages[channel.id];
+        if (sendSpectators && this.lobby) {
+            const msg = generator2(null);
+            promises.push(this.stateMessage.send(
+                this.lobby,
+                msg, 
+                i?.channel === this.lobby ? i : undefined
+            ));
+        }
+
+        for (const player of players) {
+            const msg = generator2(player);
+            promises.push(player.createDM().then(dm => this.stateMessage.send(
+                dm,
+                msg,
+                i?.channel === dm ? i : undefined
+            )));
+        }
+
+        await Promise.all(promises);
+    }
+
+    async closeMessage(players: User[], message?: MessageGenerator | MessageOptions, i?: UserInteraction, closeSpectators = true): Promise<void> {
+        const promises: Promise<unknown>[] = [];
+        
+        const generator = message ?
+            (typeof message === 'function' ? message : () => message) :
+            (_: unknown, channel: TextBasedChannel) => this.stateMessage.messages[channel.id]?.msg;
+        const generator2 = (user: User | null, channel: TextBasedChannel) => {
+            const m = generator(user, channel);
+            if (!m) return undefined;
+
+            const options = {
+                embeds: m.embeds as MessageEmbedOptions[],
+                components: m.components && disableButtons(m.components),
+            };
+            return options;
+        }
+
+        if (closeSpectators && this.lobby) {
+            const msg = generator2(null, this.lobby);
+            if (msg) {
+                promises.push(this.stateMessage.send(
+                    this.lobby,
+                    msg, 
+                    i?.channel === this.lobby ? i : undefined
+                ));
+                delete this.stateMessage.messages[this.lobby.id];
+            }
+        }
+
+        for (const player of players) {
+            promises.push(player.createDM().then(dm => {
+                const msg = generator2(player, dm);
+                if (msg) {
+                    this.stateMessage.send(
+                        dm,
+                        msg,
+                        i?.channel === dm ? i : undefined
+                    );
+                    delete this.stateMessage.messages[dm.id];
+                }
+            }));
         }
 
         await Promise.all(promises);

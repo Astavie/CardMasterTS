@@ -2,9 +2,9 @@ import { BaseCommandInteraction, ButtonInteraction, Client, EmbedFieldData, Mess
 import { Serializable } from "./saving";
 
 export type MessageOptions = {
-    embeds: MessageEmbedOptions[];
-    components: (Required<MessageActionRowOptions>)[];
-    forceList: boolean;
+    embeds?: MessageEmbedOptions[];
+    components?: (Required<MessageActionRowOptions>)[];
+    forceList?: boolean;
 }
 
 export function createButtonGrid(length: number, generator: (i: number) => MessageButtonOptions): (Required<MessageActionRowOptions>)[] {
@@ -62,7 +62,7 @@ const embedFieldLimit = 25;
 function prepareMessage(msg: MessageOptions): MessageEmbedOptions[] {
     const embeds: MessageEmbedOptions[] = [];
 
-    for (const embed of msg.embeds) {
+    if (msg.embeds) for (const embed of msg.embeds) {
 
         if (!embed.fields) {
             embeds.push(embed);
@@ -185,7 +185,7 @@ export class MessageController implements Serializable<MessageSave> {
 
         const prepared = {
             embeds: [cache[page]],
-            components: cache.length > 1 || options.forceList
+            components: options.components && (cache.length > 1 || options.forceList)
                 ? addPageButtons(options.components, page, cache.length)
                 : options.components,
         };
@@ -269,7 +269,7 @@ export class MessageController implements Serializable<MessageSave> {
     }
 
     isMyInteraction(i: MessageComponentInteraction | ModalSubmitInteraction) {
-        return this.messages[i.channel!.id]?.msg.id === i.message?.id;
+        return this.messages[i.channelId ?? ""]?.msg.id === i.message?.id;
     }
 
 }
