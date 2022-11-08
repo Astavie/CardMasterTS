@@ -2,7 +2,7 @@ import { randomInt } from "crypto";
 import { User } from "discord.js";
 import { countRealizations, realizeCard } from "../../util/card";
 import { GameType } from "../game";
-import { ContextOf, forward, LogicMap, LogicSequence, loop, next, or, then } from "../logic";
+import { ContextOf, forward, LogicMap, loop, next, or, sequence } from "../logic";
 import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
@@ -105,16 +105,16 @@ const roundMap: LogicMap<void, Record<'hand' | 'read', RoundContext>> = {
     read: readLogic
 }
 
-const roundLogic = new LogicSequence(roundMap); 
+const roundLogic = sequence(roundMap); 
 export type GameContext = ContextOf<typeof roundLogic>;
 
 // -- game logic --
 let gameLogic =
     or(
-        loop(then(
+        loop(
             or(joinLeaveLogic, roundLogic),
-            prepareRound
-        )),
+            prepareRound,
+        ),
         gameResultLogic
     ); // first add/remove players, then further game logic
 
@@ -124,8 +124,7 @@ const globalMap: LogicMap<void, { 'setup': Partial<CAHSetupContext>, 'game': Gam
     game:  gameLogic,
 }
 
-const globalLogic = new LogicSequence(globalMap);
-
+const globalLogic = sequence(globalMap);
 type GlobalContext = ContextOf<typeof globalLogic>;
 
 export const CAH: GameType<GlobalContext> = {

@@ -8,7 +8,7 @@ import { GameImpl, games, GameSave, gametypes } from "./game/game";
 import Nedb = require("nedb");
 
 // Create a new client instance
-const client = new Client({ intents: [Intents.FLAGS.GUILDS] });
+const client = new Client({ intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.DIRECT_MESSAGES] });
 
 // Create db
 const db = new Nedb({ filename: "db/games", autoload: true });
@@ -31,6 +31,32 @@ client.once('ready', async () => {
 
 client.on('error', e => {
     console.error(e);
+});
+
+client.on('messageCreate', message => {
+    if (message.channel.type !== 'DM' || message.author.bot) return;
+    const player = message.channel.recipient;
+
+    for (const game of games) {
+        if (game.players.includes(player)) {
+            game.onMessage(message);
+            return;
+        }
+    }
+});
+
+client.on('messageUpdate', async message_ => {
+    const message = await message_.fetch();
+
+    if (message.channel.type !== 'DM' || message.author.bot) return;
+    const player = message.channel.recipient;
+
+    for (const game of games) {
+        if (game.players.includes(player)) {
+            game.onMessage(message);
+            return;
+        }
+    }
 });
 
 // On commands
@@ -82,19 +108,25 @@ client.on('interactionCreate', interaction => {
                 return;
             }
 
+            let found = 0;
+
             for (const game of games) {
-                if (game.lobby === interaction.channel) {
+                if (game.lobby === interaction.channel || interaction.channelId === Object.keys(game.lobbyMessage.messages)[0]) {
                     // Kill the game
                     game.end();
 
                     // Send to lobby
-                    interaction.reply({ content: "Game forcefully stopped." });
-                    return;
+                    found += 1;
                 }
             }
 
-            interaction.reply({ ephemeral: true, content: "There is no active game in this channel!" });
-            return;
+            if (found > 1) {
+                interaction.reply({ content: found + " games forcefully stopped." });
+            } else if (found) {
+                interaction.reply({ content: "Game forcefully stopped." });
+            } else {
+                interaction.reply({ ephemeral: true, content: "There is no active game in this channel!" });
+            }
     }
 });
 

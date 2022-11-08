@@ -1,9 +1,11 @@
-import assert from "assert";
 import { Client, ColorResolvable, CommandInteraction, Message, MessageEmbedOptions, Snowflake, TextBasedChannel, User } from "discord.js";
+import { shuffle } from "../util/card";
 import { disableButtons, MessageController, MessageOptions, MessageSave } from "../util/message";
 import { Serializable } from "../util/saving";
 import { CAH } from "./cah/cah";
-import { Event, Game, Logic, MessageGenerator, UserInteraction } from "./logic";
+import { ContextOf, Event, forward, Game, Logic, MessageGenerator, sequence, UserInteraction } from "./logic";
+import { writingTelephone } from "./sentencer/sentencer";
+import { SetupLogic } from "./setup";
 
 // Games
 export const games: GameImpl<unknown>[] = [];
@@ -14,6 +16,33 @@ function addGame(game: GameType<unknown>): void {
 }
 
 addGame(CAH);
+
+const testedLogic = writingTelephone;
+
+const testerSetup = new SetupLogic<ContextOf<typeof testedLogic>, []>([], ({ players, game }, i) => {
+    game.closeLobby(undefined, i, ['_close']);
+    return {
+        previous: Array(players.length).fill(null).map(() => []),
+        context: {
+            prompt: 'Antonyms',
+            description: 'Write the opposite of the following sentence:',
+        },
+        shuffle: shuffle(players.map(p => p.id)),
+        results: {},
+    };
+});
+
+const logicTester: GameType<unknown> = {
+    name: "tester",
+    color: "AQUA",
+    logic: sequence({
+        setup: forward(testerSetup, 'game'),
+        game: testedLogic,
+    }),
+    initialContext: () => ({ state: 'setup', context: {} })
+}
+
+addGame(logicTester);
 
 // Impl
 export type GameType<C> = {
@@ -35,7 +64,7 @@ export type GameSave<C> = {
 export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
     players: User[] = [];
-    lobby?: TextBasedChannel;
+    lobby: TextBasedChannel;
 
     type: GameType<C>;
     context: C;
@@ -55,7 +84,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             lobbyMessage: this.lobbyMessage.save(),
             stateMessage: this.stateMessage.save(),
             context: this.context,
-            lobby: this.lobby?.id,
+            lobby: this.lobby.id,
         }
     }
 
@@ -84,6 +113,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
     start(i: CommandInteraction) {
         games.push(this);
+        this.lobby = i.channel!;
         this.onEvent({ type: 'start', interaction: i });
     }
 
@@ -128,6 +158,10 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         return this.stateMessage.isMyInteraction(i) || this.lobbyMessage.isMyInteraction(i);
     }
 
+    onMessage(m: Message) {
+        this.onEvent({ type: 'dm', message: m });
+    }
+
     onInteraction(i: UserInteraction) {
         if (i.isButton() && (i.customId === '_prevpage' || i.customId === '_nextpage')) {
             this.stateMessage.flipPage(i);
@@ -149,7 +183,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         }
 
         if (sendSpectators) {
-            const p = this.lobby?.send(generator2(null));
+            const p = this.lobby.send(generator2(null));
             if (p) promises.push(p)
         }
 
@@ -203,7 +237,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             return m;
         }
 
-        if (sendSpectators && this.lobby) {
+        if (sendSpectators) {
             const msg = generator2(null);
             promises.push(this.stateMessage.send(
                 this.lobby,
@@ -241,23 +275,24 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             return options;
         }
 
-        if (closeSpectators && this.lobby) {
+        if (closeSpectators) {
             const msg = generator2(null, this.lobby);
             if (msg) {
                 promises.push(this.stateMessage.send(
                     this.lobby,
                     msg, 
                     i?.channel === this.lobby ? i : undefined
-                ));
-                delete this.stateMessage.messages[this.lobby.id];
+                ).then(() => {
+                    delete this.stateMessage.messages[this.lobby.id];
+                }));
             }
         }
 
         for (const player of players) {
-            promises.push(player.createDM().then(dm => {
+            promises.push(player.createDM().then(async dm => {
                 const msg = generator2(player, dm);
                 if (msg) {
-                    this.stateMessage.send(
+                    await this.stateMessage.send(
                         dm,
                         msg,
                         i?.channel === dm ? i : undefined
