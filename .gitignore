@@ -1,7 +1,6 @@
 .env
 node_modules/
-build/
-package-lock.json
 db.json
 src/game/cah/packs/eppgroep.ts
+build/game/cah/packs/eppgroep.js
 db/
