@@ -2,7 +2,7 @@ import { randomInt } from "crypto";
 import { User } from "discord.js";
 import { countRealizations, realizeCard } from "../../util/card";
 import { GameType } from "../game";
-import { ContextOf, forward, LogicMap, loop, next, or, sequence } from "../logic";
+import { ContextOf, forward, LogicMap, loop, next, or, sequence, singleResolve } from "../logic";
 import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
@@ -112,7 +112,7 @@ export type GameContext = ContextOf<typeof roundLogic>;
 let gameLogic =
     or(
         loop(
-            or(joinLeaveLogic, roundLogic),
+            singleResolve(or(joinLeaveLogic, roundLogic)),
             prepareRound,
         ),
         gameResultLogic

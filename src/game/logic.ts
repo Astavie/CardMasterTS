@@ -63,14 +63,14 @@ export type ContextOf<T> = T extends Logic<unknown, infer C> ? C : never;
 export type ReturnOf<T> = T extends Logic<infer T, unknown> ? T : never;
 
 export function sequence<T, S>(logicmap: LogicMap<T, S>): Logic<T, SequenceContext<S>> {
-    return then(singleResolve({
+    return then({
         onEvent(full, event, resolve: Resolve<T | SequenceContext<S>>) {
             logicmap[full.ctx.state].onEvent?.({ ...full, ctx: full.ctx.context }, event, resolve);
         },
         onExit(full) {
             return logicmap[full.ctx.state].onExit?.({ ...full, ctx: full.ctx.context });
         },
-    }), async (full, t, resolve, old, logic) => {
+    }, async (full, t, resolve, old, logic) => {
         if (t && 'state' in t) {
             await logic.onExit?.(full);
             full.ctx.context = t.context;
@@ -262,7 +262,7 @@ export function next<K, C>(a: Logic<unknown, C>, state: K): Logic<Next<K, C>, C>
 }
 
 export function loop<T, C>(a: Logic<T, C>, f: (full: FullContext<C>, t: T) => Awaitable<boolean>): Logic<void, C> {
-    return then(singleResolve(a), async (full, t, resolve, old, logic) => {
+    return then(a, async (full, t, resolve, old, logic) => {
         if (await f(full, t)) {
             await logic.onExit?.(full);
             logic.onEvent?.(full, { type: 'update' }, old);

@@ -1,7 +1,7 @@
 import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowOptions, MessageButtonOptions, MessageComponentInteraction, ModalSubmitInteraction, User } from 'discord.js';
 import { countBlanks, escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
-import { FullContext, Logic, Resolve } from '../logic';
+import { FullContext, Logic, Resolve, singleResolve } from '../logic';
 import { getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
 
 function message({ ctx, players }: FullContext<RoundContext>, player: User | null): MessageOptions {
@@ -115,7 +115,7 @@ function message({ ctx, players }: FullContext<RoundContext>, player: User | nul
     };
 }
 
-export const handLogic: Logic<void, RoundContext> = {
+export const handLogic: Logic<void, RoundContext> = singleResolve({
     async onExit({ game, players }) {
         // do not close spectator message
         await game.closeMessage(players, undefined, undefined, false);
@@ -173,7 +173,7 @@ export const handLogic: Logic<void, RoundContext> = {
                         if (playing.indexOf(null) === -1) {
                             resolveWhenPlayersDone(full, i, resolve);
                         } else {
-                            game.updateMessage([player], message(full, player), i);
+                            game.updateMessage([player], message(full, player), i, false);
                         }
                     } else {
                         playing[pindex] = null;
@@ -181,7 +181,7 @@ export const handLogic: Logic<void, RoundContext> = {
                         if (uindex === -1) {
                             game.updateMessage(players, p => message(full, p), i);
                         } else {
-                            game.updateMessage([player], message(full, player), i);
+                            game.updateMessage([player], message(full, player), i, false);
                         }
                     }
                 }
@@ -216,7 +216,7 @@ export const handLogic: Logic<void, RoundContext> = {
         }
     },
 
-};
+});
 
 function allPlayersDone(ctx: RoundContext): boolean {
     if (ctx.quiplash) {
