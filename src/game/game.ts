@@ -125,7 +125,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild });
         games[this.guild].splice(games[this.guild].indexOf(this), 1);
 
-        if (this.lobby && this.lobby.isThread() && this.lobby.ownerId === process.env.CLIENT_ID) {
+        if (this.lobby && this.lobby.isThread()) {
             this.lobby.setArchived(true, 'Game ended.');
         }
     }

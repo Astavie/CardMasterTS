@@ -5,7 +5,7 @@ config();
 // Require the necessary discord.js classes
 import { ChannelType, Client, GatewayIntentBits } from 'discord.js';
 import { GameImpl, games, gametypes } from "./game/game";
-import { createSave, db, loadGames, saveGames } from "./db";
+import { createSave, db, loadGames, refreshPack, saveGames } from "./db";
 
 // Create a new client instance
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages] });
@@ -104,11 +104,17 @@ client.on('interactionCreate', interaction => {
                     saveGames(db[interaction.guildId!]);
                     interaction.reply({ content: `Pack \`${name2}\` removed!` });
                     break;
+                case "refresh":
+                    const name3 = interaction.options.getString('pack')!;
+                    // TODO: Validate name
+                    refreshPack(interaction.guildId!, name3);
+                    interaction.reply({ content: `Pack \`${name3}\` refreshed!` });
+                    break;
             }
             break;
         case "play":
-            if (!interaction.channel) {
-                interaction.reply({ ephemeral: true, content: "Error: could not find channel!" });
+            if (!interaction.channel || interaction.channel.type !== ChannelType.GuildText) {
+                interaction.reply({ ephemeral: true, content: "Error: invalid channel!" });
                 return;
             }
 

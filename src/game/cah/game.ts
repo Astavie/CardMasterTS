@@ -196,7 +196,7 @@ export const joinLeaveLogic: Logic<void, GameContext> = {
                 game.send(players, { embeds: [{
                     description: '**The round has been skipped because the Card Czar left the game.**'
                 }]});
-                game.closeMessage(players).then(resolve);
+                game.closeMessage([...players, i.user]).then(resolve);
                 return;
             } else {
                 if (ctx.context.czar > index) {

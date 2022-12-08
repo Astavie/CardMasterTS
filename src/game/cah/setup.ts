@@ -52,7 +52,7 @@ export const packs: {[key:string]:{[key:string]:Pack}} = {};
 
 export async function getPack(guildid: Snowflake, pack: string): Promise<Pack> {
     packs[guildid] ??= {};
-    packs[guildid][pack] ??= escapePack({ name: pack, cards: await loadPack(guildid, pack) });
+    packs[guildid][pack] ??= escapePack(await loadPack(guildid, pack));
     return packs[guildid][pack];
 }
 
@@ -72,9 +72,9 @@ async function startGame({ ctx, players, game, guildid }: FullContext<CAHSetupCo
     for (const pack of ctx['Packs']) {
         const p: Pack = await getPack(guildid, names[pack])
         for (let i = 0; i < p.cards.white.length; i++)
-            whiteDeck.push([names[pack], i]);
+            whiteDeck.push([p.rawname, i]);
         for (let i = 0; i < p.cards.black.length; i++)
-            blackDeck.push([names[pack], i]);
+            blackDeck.push([p.rawname, i]);
     }
 
     shuffle(whiteDeck);

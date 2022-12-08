@@ -22,6 +22,10 @@ const commands = [
             .setName('remove')
             .addStringOption(option => option.setName('pack').setDescription('The pack to remove.').setRequired(true))
             .setDescription('Remove a pack from this guild.'))
+        .addSubcommand(new SlashCommandSubcommandBuilder()
+            .setName('refresh')
+            .addStringOption(option => option.setName('pack').setDescription('The pack to refresh.').setRequired(true))
+            .setDescription('Redownload a pack from this guild.'))
         .setDescription('Manage the packs of this guild.'),
     new SlashCommandBuilder()
         .setName('play')

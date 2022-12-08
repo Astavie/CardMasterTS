@@ -1,5 +1,5 @@
 import { Snowflake } from "discord.js"
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import path from "path"
 import fetch from "node-fetch"
 import { GameSave } from "./game/game"
@@ -10,6 +10,10 @@ export type Save = {
     path: string,
     packs: {[key:string]:string},
     games: GameSave<unknown>[],
+}
+
+function base64(i: number): string {
+    return Buffer.from([i>>24, i>>16, i>>8, i]).toString('base64').substring(0, 6).replaceAll('/', '_');
 }
 
 export function createSave(guild: Snowflake): Save {
@@ -25,22 +29,46 @@ export function saveGames(save: Save) {
     writeFileSync(path.join(save.path, "games.json"), JSON.stringify(save.games));
 }
 
-export async function loadPack(guild: Snowflake, pack: string): Promise<any> {
+export function refreshPack(guild: Snowflake, pack: string) {
+    const p = path.join(process.cwd(), "db", guild, "packs", pack + ".json");
+    if (existsSync(p)) rmSync(p);
+}
+
+const promises: {[key:string]:Promise<void>} = {}
+
+export async function loadPack(guild: Snowflake, pack: string): Promise<{ name: string, rawname: string, cards: any }> {
     const p = path.join(process.cwd(), "db", guild, "packs", pack + ".json");
     if (!existsSync(p)) {
-        const url = db[guild].packs[pack];
-        const res = await fetch(url)!;
-        if (!res.body) {
-            return;
+        if (!(pack in promises)) {
+            const timestamp = base64(Date.now());
+            const exportPath = path.join(process.cwd(), "db", guild, "packs", timestamp + ".json");
+
+            const url = db[guild].packs[pack];
+            if (!url) {
+                throw new Error();
+            }
+
+            promises[pack] = (async () => {
+                const res = await fetch(url)!;
+                if (!res.body) {
+                    throw new Error();
+                }
+                const fileStream = createWriteStream(exportPath);
+                await new Promise((resolve, reject) => {
+                    res.body!.pipe(fileStream);
+                    res.body!.on("error", reject);
+                    fileStream.on("finish", resolve);
+                });
+                symlinkSync(exportPath, p);
+            })();
+            await promises[pack];
+            delete promises[pack];
+        } else {
+            await promises[pack];
         }
-        const fileStream = createWriteStream(p);
-        await new Promise((resolve, reject) => {
-            res.body!.pipe(fileStream);
-            res.body!.on("error", reject);
-            fileStream.on("finish", resolve);
-        });
     }
-    return JSON.parse(readFileSync(p).toString());
+    const rawname = lstatSync(p).isSymbolicLink() ? path.basename(readlinkSync(p), ".json") : pack;
+    return { name: pack, rawname, cards: JSON.parse(readFileSync(p).toString()) };
 }
 
 export async function loadGames(save: Save) {

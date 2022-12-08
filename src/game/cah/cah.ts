@@ -13,6 +13,7 @@ export type UnrealizedCard = Card | [string, number]; // [pack, card]
 
 export type Pack = {
     name: string
+    rawname: string
     cards: {
         white: string[]
         black: ({
