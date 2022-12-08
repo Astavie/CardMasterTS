@@ -4,23 +4,23 @@ import { createButtonGrid, MessageOptions } from '../../util/message';
 import { FullContext, Logic } from '../logic';
 import { getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
 
-function message({ ctx, players }: FullContext<RoundContext>, player: User | null): MessageOptions {
-    const prompt = getBlackCard(ctx.prompt);
+async function message({ ctx, players, guildid }: FullContext<RoundContext>, player: User | null): Promise<MessageOptions> {
+    const prompt = await getBlackCard(guildid, ctx.prompt);
     const blanks = countBlanks(prompt);
 
-    const answers = ctx.shuffle.map((p, i) => {
+    const answers = (await Promise.all(ctx.shuffle.map(async (p, i) => {
         let answers: string[];
         if (ctx.quiplash) {
             answers = ctx.playing[p] as string[];
         } else if (ctx.playing[p] === 'double') {
-            answers = ctx.doubleornothing![p].cards.map(getWhiteCard);
+            answers = await Promise.all(ctx.doubleornothing![p].cards.map(c => getWhiteCard(guildid, c)));
             const missing = blanks - answers.length;
             for (let i = 0; i < missing; i++) {
                 answers.push(answers[i]);
             }
         } else {
-            answers = (ctx.playing[p] as (number | string)[])
-                .map(i => getWhiteCard(ctx.hand[p][i!]));
+            answers = await Promise.all((ctx.playing[p] as (number | string)[])
+                .map(i => getWhiteCard(guildid, ctx.hand[p][i!])));
         }
 
         let answer = prompt;
@@ -31,9 +31,9 @@ function message({ ctx, players }: FullContext<RoundContext>, player: User | nul
         }
 
         return `\`${i + 1}.\` ${answer}`;
-    }).join('\n');
+    }))).join('\n');
 
-    const message = `Card Czar: ${players[ctx.czar]}\n\n> ${getBlackCard(ctx.prompt)}\n\n${answers}`;
+    const message = `Card Czar: ${players[ctx.czar]}\n\n> ${await getBlackCard(guildid, ctx.prompt)}\n\n${answers}`;
     
     const components: (Required<MessageActionRowOptions>)[] = [];
     if (players[ctx.czar] === player) {
@@ -69,8 +69,8 @@ export const readLogic: Logic<void, RoundContext> = {
     async onExit({ game, players }: FullContext<RoundContext>) {
         await game.closeMessage(players);
     },
-    onEvent(full, event, resolve) {
-        const { ctx, game, players } = full;
+    async onEvent(full, event, resolve) {
+        const { ctx, game, players, guildid } = full;
         switch (event.type) {
         case 'update':
             game.updateMessage(players, p => message(full, p));
@@ -84,7 +84,7 @@ export const readLogic: Logic<void, RoundContext> = {
         case 'interaction':
             const i = event.interaction;
             if (i.customId.startsWith('answer_')) {
-                const prompt = getBlackCard(ctx.prompt);
+                const prompt = await getBlackCard(guildid, ctx.prompt);
                 const blanks = countBlanks(prompt);
                 const winner = ctx.shuffle[parseInt(i.customId.substring(7))];
             
@@ -92,14 +92,14 @@ export const readLogic: Logic<void, RoundContext> = {
                 if (ctx.quiplash) {
                     answers = ctx.playing[winner] as string[];
                 } else if (ctx.playing[winner] === 'double') {
-                    answers = ctx.doubleornothing![winner].cards.map(getWhiteCard);
+                    answers = await Promise.all(ctx.doubleornothing![winner].cards.map(c => getWhiteCard(guildid, c)));
                     const missing = blanks - answers.length;
                     for (let i = 0; i < missing; i++) {
                         answers.push(answers[i]);
                     }
                 } else {
-                    answers = (ctx.playing[winner] as (number | null)[])
-                        .map(i => getWhiteCard(ctx.hand[winner][i!]));
+                    answers = await Promise.all((ctx.playing[winner] as (number | null)[])
+                        .map(i => getWhiteCard(guildid, ctx.hand[winner][i!])));
                 }
 
                 const answer = `> ${fillBlanks(prompt, answers)}`;

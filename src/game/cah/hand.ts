@@ -4,8 +4,8 @@ import { createButtonGrid, MessageOptions } from '../../util/message';
 import { FullContext, Logic, Resolve, singleResolve } from '../logic';
 import { getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
 
-function message({ ctx, players }: FullContext<RoundContext>, player: User | null): MessageOptions {
-    let prompt = getBlackCard(ctx.prompt);
+async function message({ ctx, players, guildid }: FullContext<RoundContext>, player: User | null): Promise<MessageOptions> {
+    let prompt = await getBlackCard(guildid, ctx.prompt);
     const blanks = countBlanks(prompt);
     
     const fields: EmbedFieldData[] = [];
@@ -24,24 +24,24 @@ function message({ ctx, players }: FullContext<RoundContext>, player: User | nul
 
             let cards: (string | null)[] = [];
             if (playing === 'double') {
-                cards = ctx.doubleornothing![player.id].cards.map(getWhiteCard);
+                cards = await Promise.all(ctx.doubleornothing![player.id].cards.map(c => getWhiteCard(guildid, c)));
                 const missing = blanks - cards.length;
                 for (let i = 0; i < missing; i++) {
                     cards.push(cards[i]);
                 }
             } else {
-                cards = playing.map(i => i !== null ? getWhiteCard(hand[i]) : null);
+                cards = await Promise.all(playing.map(i => i !== null ? getWhiteCard(guildid, hand[i]) : null));
             }
             prompt = fillBlanks(prompt, cards);
 
             fields.push({
                 name: 'Hand',
-                value: hand.map((c, i) => `\`${(i + 1).toString().padStart(2)}.\` ${getWhiteCard(c)}`).join('\n'),
+                value: (await Promise.all(hand.map(async (c, i) => `\`${(i + 1).toString().padStart(2)}.\` ${await getWhiteCard(guildid, c)}`))).join('\n'),
             });
  
             if (ctx.doubleornothing && player.id in ctx.doubleornothing) fields.push({
                 name: 'Last cards played',
-                value: ctx.doubleornothing[player.id].cards.map(getWhiteCard).join('\n'),
+                value: (await Promise.all(ctx.doubleornothing[player.id].cards.map(c => getWhiteCard(guildid, c)))).join('\n'),
             })
 
             const playingStyle    = (playing !== 'double' && !playing.includes(null)) ? 'SUCCESS' : 'PRIMARY';
@@ -120,8 +120,8 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
         // do not close spectator message
         await game.closeMessage(players, undefined, undefined, false);
     },
-    onEvent(full, event, resolve) {
-        const { ctx, players, game } = full;
+    async onEvent(full, event, resolve) {
+        const { ctx, players, game, guildid } = full;
         switch (event.type) {
         case 'update':
             game.updateMessage(players, p => message(full, p));
@@ -139,7 +139,7 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
             if (!ctx.quiplash) {
                 if (i.customId === 'double') {
                     if (ctx.playing[i.user.id] === 'double') {
-                        const prompt = getBlackCard(ctx.prompt);
+                        const prompt = await getBlackCard(guildid, ctx.prompt);
                         const blanks = countBlanks(prompt);
                         ctx.playing[i.user.id] = Array(blanks).fill(null)
                         game.updateMessage(players, p => message(full, p), i);
@@ -148,7 +148,7 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
                         resolveWhenPlayersDone(full, i, resolve);
                     }
                 } else if (i.customId.startsWith('hand_')) {
-                    const prompt = getBlackCard(ctx.prompt);
+                    const prompt = await getBlackCard(guildid, ctx.prompt);
                     const blanks = countBlanks(prompt);
                     const hand = parseInt(i.customId.substring(5));
 
@@ -173,7 +173,7 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
                         if (playing.indexOf(null) === -1) {
                             resolveWhenPlayersDone(full, i, resolve);
                         } else {
-                            game.updateMessage([player], message(full, player), i, false);
+                            game.updateMessage([player], await message(full, player), i, false);
                         }
                     } else {
                         playing[pindex] = null;
@@ -181,20 +181,20 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
                         if (uindex === -1) {
                             game.updateMessage(players, p => message(full, p), i);
                         } else {
-                            game.updateMessage([player], message(full, player), i, false);
+                            game.updateMessage([player], await message(full, player), i, false);
                         }
                     }
                 }
             } else {
                 if (i.isButton()) {
                     if (i.customId === 'fill') {
-                        fillModal(getBlackCard(ctx.prompt), i);
+                        fillModal(await getBlackCard(guildid, ctx.prompt), i);
                     } else if (i.customId === 'random') {
                         if (ctx.playing[i.user.id] === 'random') {
                             ctx.playing[i.user.id] = null;
                             game.updateMessage(players, p => message(full, p), i);
                         } else {
-                            const prompt = getBlackCard(ctx.prompt);
+                            const prompt = await getBlackCard(guildid, ctx.prompt);
                             const blanks = countBlanks(prompt);
 
                             const count = Object.values(ctx.playing).filter(p => p === 'random').length + 1;
@@ -226,18 +226,18 @@ function allPlayersDone(ctx: RoundContext): boolean {
     }
 }
 
-function resolveWhenPlayersDone(full: FullContext<RoundContext>, i: MessageComponentInteraction | ModalSubmitInteraction | undefined, resolve: Resolve<void>) {
-    const { game, ctx, players } = full;
+async function resolveWhenPlayersDone(full: FullContext<RoundContext>, i: MessageComponentInteraction | ModalSubmitInteraction | undefined, resolve: Resolve<void>) {
+    const { game, ctx, players, guildid } = full;
     if (allPlayersDone(ctx)) {
         // put random cards in
         if (ctx.quiplash) {
-            const prompt = getBlackCard(ctx.prompt);
+            const prompt = await getBlackCard(guildid, ctx.prompt);
             const blanks = countBlanks(prompt);
             for (const player of Object.keys(ctx.playing)) {
                 if (ctx.playing[player] === 'random') {
                     const cards: string[] = [];
                     while (cards.length < blanks) {
-                        cards.push(getWhiteCard(realizeWhiteCard(ctx.whiteDeck.pop()!, players)));
+                        cards.push(await getWhiteCard(guildid, await realizeWhiteCard(guildid, ctx.whiteDeck.pop()!, players)));
                     }
                     ctx.playing[player] = cards;
                 }

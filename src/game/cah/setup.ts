@@ -1,46 +1,21 @@
-import { ButtonInteraction } from 'discord.js';
+import { ButtonInteraction, Snowflake } from 'discord.js';
+import { db, loadPack } from '../../db';
 import { countBlanks, escapeDiscord, shuffle } from '../../util/card';
 import { FullContext } from '../logic';
 import { SetupContext, SetupLogic } from '../setup';
-import { Card, GameContext, getBlackCard, getWhiteCard, Pack, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
-import { basePack, fullPack } from './packs/cahstandard';
-
-// Global packs
-export const packs: Pack[] = [
-    escapePack({ name: "CAH Base", cards: basePack }),
-    escapePack({ name: "CAH Full", cards: fullPack }),
-];
-
-// Packs inside .gitignore
-function conditionalRequire(name: string): any {
-    try {
-        return require(name);
-    } catch {}
-    return undefined;
-}
-
-const eppgroep = conditionalRequire("./packs/eppgroep")?.eppgroep;
-
-if (eppgroep) {
-    const epack = escapePack({
-        name: "EPPGroep",
-        cards: eppgroep,
-    });
-    packs.push(epack);
-    packs.push(epack);
-}
+import { Card, GameContext, getBlackCard, getCard, getWhiteCard, Pack, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
 
 function escapePack(p: Pack) {
     p.cards.white = p.cards.white.map(escapeDiscord);
-    p.cards.black = p.cards.black.map(escapeDiscord);
+    p.cards.black = p.cards.black.map(getCard).map(escapeDiscord);
     return p;
 }
 
 const config = [{
     type: 'choice',
     name: 'Packs',
-    values: packs.map(pack => ({ label: pack.name })),
-    default: eppgroep ? [0, 2, 3] : [0],
+    values: [],
+    default: [],
     min: 1,
     max: Number.MAX_SAFE_INTEGER,
 },{
@@ -62,7 +37,7 @@ const config = [{
     default: 10,
 }] as const;
 
-export const setupLogic = new SetupLogic(config, startGame, ({ ctx, players }) => {
+export const setupLogic = new SetupLogic(config, { 'Packs': ({ guildid }) => Object.keys(db[guildid]?.packs ?? {}).map(name => ({ label: name }))}, startGame, ({ ctx, players }) => {
     const splayers: string[] = players.map(player => player.toString());
     if (ctx['Rules'][0]) splayers.unshift('`Rando Cardrissian`');
     return { fields: [{
@@ -73,7 +48,15 @@ export const setupLogic = new SetupLogic(config, startGame, ({ ctx, players }) =
 
 export type CAHSetupContext = SetupContext<typeof config>;
 
-async function startGame({ ctx, players, game }: FullContext<CAHSetupContext>, i: ButtonInteraction): Promise<GameContext | null> {
+export const packs: {[key:string]:{[key:string]:Pack}} = {};
+
+export async function getPack(guildid: Snowflake, pack: string): Promise<Pack> {
+    packs[guildid] ??= {};
+    packs[guildid][pack] ??= escapePack({ name: pack, cards: await loadPack(guildid, pack) });
+    return packs[guildid][pack];
+}
+
+async function startGame({ ctx, players, game, guildid }: FullContext<CAHSetupContext>, i: ButtonInteraction): Promise<GameContext | null> {
     if (players.length < 2) {
         i.reply({
             content: 'You need at least two players to start.',
@@ -85,11 +68,13 @@ async function startGame({ ctx, players, game }: FullContext<CAHSetupContext>, i
     const whiteDeck: UnrealizedCard[] = [];
     const blackDeck: UnrealizedCard[] = [];
 
+    const names = Object.keys(db[guildid]?.packs ?? {});
     for (const pack of ctx['Packs']) {
-        for (let i = 0; i < packs[pack].cards.white.length; i++)
-            whiteDeck.push([pack, i]);
-        for (let i = 0; i < packs[pack].cards.black.length; i++)
-            blackDeck.push([pack, i]);
+        const p: Pack = await getPack(guildid, names[pack])
+        for (let i = 0; i < p.cards.white.length; i++)
+            whiteDeck.push([names[pack], i]);
+        for (let i = 0; i < p.cards.black.length; i++)
+            blackDeck.push([names[pack], i]);
     }
 
     shuffle(whiteDeck);
@@ -104,8 +89,8 @@ async function startGame({ ctx, players, game }: FullContext<CAHSetupContext>, i
         return null;
     }
 
-    const prompt = realizeBlackCard(blackCard, players);
-    const blanks = countBlanks(getBlackCard(prompt));
+    const prompt = await realizeBlackCard(guildid, blackCard, players);
+    const blanks = countBlanks(await getBlackCard(guildid, prompt));
 
     let totalCards = ctx['Hand cards'] * players.length;
     if (ctx['Rules'][0]) totalCards += blanks;
@@ -130,7 +115,7 @@ async function startGame({ ctx, players, game }: FullContext<CAHSetupContext>, i
         randoPlaying = [];
         while (randoPlaying.length < blanks) {
             const card = whiteDeck.pop()!;
-            randoPlaying.push(realizeWhiteCard(card, players));
+            randoPlaying.push(await realizeWhiteCard(guildid, card, players));
         }
     }
 
@@ -139,7 +124,7 @@ async function startGame({ ctx, players, game }: FullContext<CAHSetupContext>, i
         const playing: {[key:string]:string[]|null} = Object.fromEntries(players.map(player => [player.id, null]));
         delete playing[players[0].id];
         if (randoPlaying) {
-            playing[randoId] = randoPlaying.map(getWhiteCard);
+            playing[randoId] = await Promise.all(randoPlaying.map(c => getWhiteCard(guildid, c)));
         }
         round = {
             quiplash: true,
@@ -160,7 +145,7 @@ async function startGame({ ctx, players, game }: FullContext<CAHSetupContext>, i
 
             while (phand.length < ctx['Hand cards']) {
                 const card = whiteDeck.pop()!;
-                phand.push(realizeWhiteCard(card, players));
+                phand.push(await realizeWhiteCard(guildid, card, players));
             }
         }
         const playing = Object.fromEntries(players.map(player => [player.id, Array(blanks).fill(null)]));

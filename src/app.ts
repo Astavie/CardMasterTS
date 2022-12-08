@@ -4,29 +4,30 @@ config();
 
 // Require the necessary discord.js classes
 import { Client, Intents } from 'discord.js';
-import { GameImpl, games, GameSave, gametypes } from "./game/game";
-import Nedb = require("nedb");
+import { GameImpl, games, gametypes } from "./game/game";
+import { createSave, db, loadGames, saveGames } from "./db";
 
 // Create a new client instance
 const client = new Client({ intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.DIRECT_MESSAGES] });
 
-// Create db
-const db = new Nedb({ filename: "db/games", autoload: true });
-
 // When the client is ready, run this code (only once)
 client.once('ready', async () => {
-    db.find({}, (_: unknown, docs: GameSave<unknown>[]) => {
-        for (const save of docs) {
-            const game = gametypes[save.game];
-            const instance = new GameImpl(game);
-            instance.load(client, save).then(() => {
-                games.push(instance);
-                console.log(`Loaded ${save.game} game`);
-            });
-        }
+    const id = process.env.GUILD_ID!;
+    const s = createSave(id);
+    db[id] = s;
+    games[id] = [];
+    await loadGames(s);
 
-        console.log('Ready!');
-    })
+    for (const save of s.games) {
+        const game = gametypes[save.game];
+        const instance = new GameImpl(game, id);
+        instance.load(client, save).then(() => {
+            games[id].push(instance);
+            console.log(`Loaded ${save.game} game`);
+        });
+    }
+    console.log('Ready!');
+    console.log(db[id]);
 });
 
 client.on('error', e => {
@@ -37,10 +38,12 @@ client.on('messageCreate', message => {
     if (message.channel.type !== 'DM' || message.author.bot) return;
     const player = message.channel.recipient;
 
-    for (const game of games) {
-        if (game.players.includes(player)) {
-            game.onMessage(message);
-            return;
+    for (const guildgames of Object.values(games)) {
+        for (const game of guildgames) {
+            if (game.players.includes(player)) {
+                game.onMessage(message);
+                return;
+            }
         }
     }
 });
@@ -51,10 +54,12 @@ client.on('messageUpdate', async message_ => {
     if (message.channel.type !== 'DM' || message.author.bot) return;
     const player = message.channel.recipient;
 
-    for (const game of games) {
-        if (game.players.includes(player)) {
-            game.onMessage(message);
-            return;
+    for (const guildgames of Object.values(games)) {
+        for (const game of guildgames) {
+            if (game.players.includes(player)) {
+                game.onMessage(message);
+                return;
+            }
         }
     }
 });
@@ -62,10 +67,12 @@ client.on('messageUpdate', async message_ => {
 // On commands
 client.on('interactionCreate', interaction => {
     if (interaction.isMessageComponent() || interaction.isModalSubmit()) {
-        for (const game of games) {
-            if (game.isMyInteraction(interaction)) {
-                game.onInteraction(interaction);
-                return;
+        for (const guildgames of Object.values(games)) {
+            for (const game of guildgames) {
+                if (game.isMyInteraction(interaction)) {
+                    game.onInteraction(interaction);
+                    return;
+                }
             }
         }
     }
@@ -76,13 +83,36 @@ client.on('interactionCreate', interaction => {
         case "ping":
             interaction.reply('Pong!');
             return;
+        case "pack":
+            switch (interaction.options.getSubcommand()) {
+                case "list":
+                    // TODO
+                    interaction.reply({ content: Object.keys(db[interaction.guildId!].packs).join() });
+                    break;
+                case "add":
+                    const name = interaction.options.getString('pack')!;
+                    const url = interaction.options.getString('url')!;
+                    // TODO: Validate pack
+                    db[interaction.guildId!].packs[name] = url;
+                    saveGames(db[interaction.guildId!]);
+                    interaction.reply({ content: `Pack \`${name}\` located at ${url} added!` });
+                    break;
+                case "remove":
+                    const name2 = interaction.options.getString('pack')!;
+                    // TODO: Validate name
+                    delete db[interaction.guildId!].packs[name2];
+                    saveGames(db[interaction.guildId!]);
+                    interaction.reply({ content: `Pack \`${name2}\` removed!` });
+                    break;
+            }
+            break;
         case "play":
             if (!interaction.channel) {
                 interaction.reply({ ephemeral: true, content: "Error: could not find channel!" });
                 return;
             }
 
-            for (const game of games) {
+            for (const game of games[interaction.guildId!]) {
                 if (game.lobby === interaction.channel) {
                     interaction.reply({ ephemeral: true, content: "There is already an active game in this channel!" });
                     return;
@@ -100,7 +130,7 @@ client.on('interactionCreate', interaction => {
                 return;
             }
 
-            new GameImpl(newGame).start(interaction);
+            new GameImpl(newGame, interaction.guildId!).start(interaction);
             return;
         case "stop":
             if (!interaction.channel) {
@@ -110,7 +140,7 @@ client.on('interactionCreate', interaction => {
 
             let found = 0;
 
-            for (const game of games) {
+            for (const game of games[interaction.guildId!]) {
                 if (game.lobby === interaction.channel || interaction.channelId === Object.keys(game.lobbyMessage.messages)[0]) {
                     // Kill the game
                     game.end();
@@ -127,26 +157,20 @@ client.on('interactionCreate', interaction => {
             } else {
                 interaction.reply({ ephemeral: true, content: "There is no active game in this channel!" });
             }
+            break;
     }
 });
 
 // Login to Discord with your client's token
 client.login(process.env.TOKEN);
 
-process.on("exit", () => {
-    db.remove({}, () => {
-        db.insert(games.map(g => g.save()), () => {
-            console.log("Saved games");
-        });
-    });
+process.on("exit", async () => {
+    for (const [guild, save] of Object.entries(db)) {
+        save.games = games[guild].map(g => g.save());
+        saveGames(save);
+    }
 });
 
-process.on('SIGINT', () => {
-    db.remove({}, () => {
-        db.insert(games.map(g => g.save()), () => {
-            console.log("Saved games");
-            process.exit();
-        });
-    });
+process.on("SIGINT", async () => {
+    process.exit();
 });
-

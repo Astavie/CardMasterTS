@@ -8,7 +8,7 @@ import { writingTelephone } from "./sentencer/sentencer";
 import { SetupLogic } from "./setup";
 
 // Games
-export const games: GameImpl<unknown>[] = [];
+export const games: {[key:string]: GameImpl<unknown>[]} = {};
 export const gametypes: {[key: string]: GameType<unknown>} = {};
 
 function addGame(game: GameType<unknown>): void {
@@ -19,7 +19,7 @@ addGame(CAH);
 
 const testedLogic = writingTelephone;
 
-const testerSetup = new SetupLogic<ContextOf<typeof testedLogic>, []>([], ({ players, game }, i) => {
+const testerSetup = new SetupLogic<ContextOf<typeof testedLogic>, []>([], {}, ({ players, game }, i) => {
     game.closeLobby(undefined, i, ['_close']);
     return {
         previous: Array(players.length).fill(null).map(() => []),
@@ -69,12 +69,15 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
     type: GameType<C>;
     context: C;
 
+    guild: Snowflake;
+
     lobbyMessage: MessageController = new MessageController();
     stateMessage: MessageController = new MessageController();
 
-    constructor(type: GameType<C>) {
+    constructor(type: GameType<C>, guild: Snowflake) {
         this.type = type;
         this.context = type.initialContext();
+        this.guild = guild;
     }
 
     save(): GameSave<C> {
@@ -112,14 +115,15 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
     }
 
     start(i: CommandInteraction) {
-        games.push(this);
+        games[this.guild] ??= [];
+        games[this.guild].push(this);
         this.lobby = i.channel!;
         this.onEvent({ type: 'start', interaction: i });
     }
 
     end() {
-        this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players });
-        games.splice(games.indexOf(this), 1);
+        this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild });
+        games[this.guild].splice(games[this.guild].indexOf(this), 1);
 
         if (this.lobby && this.lobby.isThread() && this.lobby.ownerId === process.env.CLIENT_ID) {
             this.lobby.setArchived(true, 'Game ended.');
@@ -127,7 +131,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
     }
 
     onEvent(event: Event) {
-        this.type.logic.onEvent?.({ ctx: this.context, game: this, players: this.players }, event, () => this.end());
+        this.type.logic.onEvent?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild }, event, () => this.end());
     }
 
     addPlayer(player: User, i?: UserInteraction): boolean {
@@ -171,11 +175,11 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
     }
 
     async send(players: User[], message: MessageGenerator | MessageOptions, sendSpectators = true): Promise<void> {
-        const promises: Promise<Message>[] = [];
+        const promises: Promise<unknown>[] = [];
 
         const generator = typeof message === 'function' ? message : () => message;
-        const generator2: MessageGenerator = user => {
-            const m = generator(user);
+        const generator2: MessageGenerator = async user => {
+            const m = await generator(user);
             if (m.embeds)
                 for (const embed of m.embeds)
                     embed.color ??= this.type.color;
@@ -183,14 +187,14 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         }
 
         if (sendSpectators) {
-            const p = this.lobby.send(generator2(null));
+            const p = this.lobby.send(await generator2(null));
             if (p) promises.push(p)
         }
 
         for (const player of players) {
-            promises.push(
-                player.createDM().then(dm => dm.send(generator2(player)))
-            );
+            promises.push((async () => {
+                (await player.createDM()).send(await generator2(player));
+            })());
         }
 
         await Promise.all(promises);
@@ -226,8 +230,8 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         const promises: Promise<void>[] = [];
         
         const generator = typeof message === 'function' ? message : () => message;
-        const generator2: MessageGenerator = user => {
-            const m = generator(user);
+        const generator2: MessageGenerator = async user => {
+            const m = await generator(user);
             if (m.embeds) {
                 for (const embed of m.embeds) {
                     embed.title ??= this.type.name;
@@ -238,7 +242,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         }
 
         if (sendSpectators) {
-            const msg = generator2(null);
+            const msg = await generator2(null);
             promises.push(this.stateMessage.send(
                 this.lobby,
                 msg, 
@@ -247,7 +251,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         }
 
         for (const player of players) {
-            const msg = generator2(player);
+            const msg = await generator2(player);
             promises.push(player.createDM().then(dm => this.stateMessage.send(
                 dm,
                 msg,
@@ -264,8 +268,8 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         const generator = message ?
             (typeof message === 'function' ? message : () => message) :
             (_: unknown, channel: TextBasedChannel) => this.stateMessage.messages[channel.id]?.msg;
-        const generator2 = (user: User | null, channel: TextBasedChannel) => {
-            const m = generator(user, channel);
+        const generator2 = async (user: User | null, channel: TextBasedChannel) => {
+            const m = await generator(user, channel);
             if (!m) return undefined;
 
             const options = {
@@ -276,7 +280,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         }
 
         if (closeSpectators) {
-            const msg = generator2(null, this.lobby);
+            const msg = await generator2(null, this.lobby);
             if (msg) {
                 promises.push(this.stateMessage.send(
                     this.lobby,
@@ -290,7 +294,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
         for (const player of players) {
             promises.push(player.createDM().then(async dm => {
-                const msg = generator2(player, dm);
+                const msg = await generator2(player, dm);
                 if (msg) {
                     await this.stateMessage.send(
                         dm,

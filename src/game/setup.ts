@@ -38,20 +38,16 @@ export type Number = {
     default: number,
 }
 
-type ToObject<T extends Arg> = { [P in T['name']]:
-    T extends Flags       ? boolean[] :
-    T extends MultiChoice ?  number[] :
-    T extends Number      ?  number   : never
+export type SetupContext<T extends readonly Arg[]> = { [A in T[number] as A['name']]:
+    A extends Flags       ? boolean[] :
+    A extends MultiChoice ?  number[] :
+    A extends Number      ?  number   : never
 };
 
-type ToObjectsArray<T extends readonly Arg[]> = {
-  [I in keyof T]: ToObject<T[I]>
+type Override<T extends readonly Arg[]> = { [A in T[number] as A['name']]?:
+    A extends Flags       ? (full: FullContext<SetupContext<T>>) => string[] :
+    A extends MultiChoice ? (full: FullContext<SetupContext<T>>) => ChoiceOption[] : never
 };
-
-type UnionToIntersection<U> =
-  (U extends any ? (k: U) => void : never) extends ((k: infer I) => void) ? I : never;
-
-export type SetupContext<T extends readonly Arg[]> = UnionToIntersection<ToObjectsArray<T>[number]>;
 
 export type SetupMessageGenerator<A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>) => MessageEmbedOptions;
 
@@ -69,11 +65,13 @@ function defaultMessageGenerator({ players }: FullContext<unknown>): MessageEmbe
 export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, Partial<SetupContext<A>>> {
 
     args: A;
+    override: Override<A>;
     generator: SetupMessageGenerator<A>;
     starter: GameStarter<T, A>;
 
-    constructor(args: A, starter: GameStarter<T, A>, generator: SetupMessageGenerator<A> = defaultMessageGenerator) {
+    constructor(args: A, override: Override<A>, starter: GameStarter<T, A>, generator: SetupMessageGenerator<A> = defaultMessageGenerator) {
         this.args = args;
+        this.override = override;
         this.generator = generator;
         this.starter = starter;
     }
@@ -98,7 +96,11 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
 
             switch (arg.type) {
             case 'flags':
-                arg.values.forEach((value, i) => row.components.push({
+                let values: readonly string[] = arg.values;
+                if (arg.name in this.override) {
+                    values = this.override[arg.name](full);
+                }
+                values.forEach((value, i) => row.components.push({
                     type: 'BUTTON',
                     customId: `_${arg.name}_${i}`,
                     label: value,
@@ -106,13 +108,17 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
                 }));
                 break;
             case 'choice':
+                let values2: readonly ChoiceOption[] = arg.values;
+                if (arg.name in this.override) {
+                    values2 = this.override[arg.name](full);
+                }
                 row.components = [{
                     type: 'SELECT_MENU',
                     customId: `_${arg.name}_`,
                     minValues: arg.min,
-                    maxValues: Math.min(arg.values.length, arg.max),
+                    maxValues: Math.min(values2.length, arg.max),
                     placeholder: arg.name,
-                    options: arg.values.map((value, i) => ({
+                    options: values2.map((value, i) => ({
                         default: (ctx[arg.name] as number[]).includes(i),
                         value: i.toString(),
                         ...value,
@@ -175,7 +181,7 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
     }
 
     onEvent(_full: FullContext<Partial<SetupContext<A>>>, event: Event, resolve: Resolve<T | null>): void {
-        const full = _full as FullContext<SetupContext<A>>;
+        const full = _full as unknown as FullContext<SetupContext<A>>;
         const { ctx, game } = full;
 
         switch (event.type) {

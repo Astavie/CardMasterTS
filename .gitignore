@@ -2,5 +2,5 @@
 node_modules/
 db.json
 src/game/cah/packs/eppgroep.ts
-build/game/cah/packs/eppgroep.js
 db/
+build/

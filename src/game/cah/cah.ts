@@ -1,21 +1,24 @@
 import { randomInt } from "crypto";
-import { User } from "discord.js";
+import { Snowflake, User } from "discord.js";
 import { countRealizations, realizeCard } from "../../util/card";
 import { GameType } from "../game";
 import { ContextOf, forward, LogicMap, loop, next, or, sequence, singleResolve } from "../logic";
 import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
-import { CAHSetupContext, packs, setupLogic } from "./setup";
+import { CAHSetupContext, getPack, setupLogic } from "./setup";
 
-export type Card = [number, number, string[]]; // [pack, card, realizations]
-export type UnrealizedCard = Card | [number, number]; // [pack, card]
+export type Card = [string, number, string[]]; // [pack, card, realizations]
+export type UnrealizedCard = Card | [string, number]; // [pack, card]
 
 export type Pack = {
     name: string
     cards: {
         white: string[]
-        black: string[]
+        black: ({
+            text: string,
+            pick: number,
+        } | string)[]
     }
 }
 
@@ -37,18 +40,22 @@ export function getPointsList(players: User[], points: {[key: string]: number}, 
 
 export const randoId = "rando";
 
-export function getWhiteCard(card: Card) {
-    return realizeCard(packs[card[0]].cards.white[card[1]], card[2]);
+export async function getWhiteCard(guild: Snowflake, card: Card) {
+    return realizeCard((await getPack(guild, card[0])).cards.white[card[1]], card[2]);
 }
 
-export function getBlackCard(card: Card) {
-    return realizeCard(packs[card[0]].cards.black[card[1]], card[2]);
+export function getCard(card: string | { text: string }): string {
+    return typeof card === 'string' ? card : card.text;
 }
 
-export function realizeWhiteCard(card: UnrealizedCard, players: User[]): Card {
+export async function getBlackCard(guild: Snowflake, card: Card) {
+    return realizeCard(getCard((await getPack(guild, card[0])).cards.black[card[1]]), card[2]);
+}
+
+export async function realizeWhiteCard(guild: Snowflake, card: UnrealizedCard, players: User[]): Promise<Card> {
     if (card[2]) return card as Card;
 
-    const spots = countRealizations(packs[card[0]].cards.white[card[1]]);
+    const spots = countRealizations((await getPack(guild, card[0])).cards.white[card[1]]);
     const fills: string[] = [];
     for (let i = 0; i < spots; i++) {
         fills.push(players[randomInt(players.length)].toString());
@@ -56,10 +63,10 @@ export function realizeWhiteCard(card: UnrealizedCard, players: User[]): Card {
     return [card[0], card[1], fills];
 }
 
-export function realizeBlackCard(card: UnrealizedCard, players: User[]): Card {
+export async function realizeBlackCard(guild: Snowflake, card: UnrealizedCard, players: User[]): Promise<Card> {
     if (card[2]) return card as Card;
 
-    const spots = countRealizations(packs[card[0]].cards.black[card[1]]);
+    const spots = countRealizations(getCard((await getPack(guild, card[0])).cards.black[card[1]]));
     const fills: string[] = [];
     for (let i = 0; i < spots; i++) {
         fills.push(players[randomInt(players.length)].toString());

@@ -5,12 +5,24 @@ config();
 // Commands
 import { REST } from '@discordjs/rest';
 import { Routes } from 'discord-api-types/v10';
-import { SlashCommandBuilder } from "@discordjs/builders";
-import { games } from "./game/game";
+import { SlashCommandBuilder, SlashCommandSubcommandBuilder } from "@discordjs/builders";
+import { gametypes } from "./game/game";
 
 const commands = [
     new SlashCommandBuilder().setName('ping').setDescription('Replies with pong!'),
     new SlashCommandBuilder().setName('stop').setDescription('Stops the game in the current channel.'),
+    new SlashCommandBuilder().setName('pack')
+        .addSubcommand(new SlashCommandSubcommandBuilder().setName('list').setDescription('List all packs within this guild.'))
+        .addSubcommand(new SlashCommandSubcommandBuilder()
+            .setName('add')
+            .addStringOption(option => option.setName('pack').setRequired(true).setDescription('The name of the new pack.'))
+            .addStringOption(option => option.setName('url').setRequired(true).setDescription('The URL containing pack data.'))
+            .setDescription('Add a new pack to this guild.'))
+        .addSubcommand(new SlashCommandSubcommandBuilder()
+            .setName('remove')
+            .addStringOption(option => option.setName('pack').setDescription('The pack to remove.').setRequired(true))
+            .setDescription('Remove a pack from this guild.'))
+        .setDescription('Manage the packs of this guild.'),
     new SlashCommandBuilder()
         .setName('play')
         .setDescription('Play a game in the current channel.')
@@ -18,7 +30,7 @@ const commands = [
             option.setName("game")
                 .setRequired(true)
                 .setDescription('The specific game to play.')
-                .setChoices(...Object.keys(games).map(name => ({
+                .setChoices(...Object.keys(gametypes).map(name => ({
                     name: name,
                     value: name
                 }))))

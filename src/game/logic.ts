@@ -1,8 +1,8 @@
 import { Awaitable } from "@discordjs/builders";
-import { CommandInteraction, Message, MessageComponentInteraction, ModalSubmitInteraction, User } from "discord.js";
+import { CommandInteraction, Message, MessageComponentInteraction, ModalSubmitInteraction, Snowflake, User } from "discord.js";
 import { MessageOptions } from "../util/message";
 
-export type MessageGenerator = (user: User | null) => MessageOptions;
+export type MessageGenerator = (user: User | null) => Awaitable<MessageOptions>;
 
 export type Game = {
     allowSpectators(): Promise<void>;
@@ -27,6 +27,7 @@ export type FullContext<C> = {
     ctx: C,
     players: User[],
     game: Game,
+    guildid: Snowflake,
 };
 
 export type Event = {

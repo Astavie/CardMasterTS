@@ -2,7 +2,7 @@ import { countBlanks } from '../../util/card';
 import { FullContext, Logic } from '../logic';
 import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
-export function prepareRound({ ctx, game, players }: FullContext<GameContext>): boolean {
+export async function prepareRound({ ctx, game, players, guildid }: FullContext<GameContext>): Promise<boolean> {
     // Check if someone won
     if (Object.values(ctx.context.points).some(points => points >= ctx.context.maxPoints)) {
         return false;
@@ -29,8 +29,8 @@ export function prepareRound({ ctx, game, players }: FullContext<GameContext>): 
         return false;
     }
 
-    ctx.context.prompt = realizeBlackCard(card, players);
-    const blanks = countBlanks(getBlackCard(ctx.context.prompt));
+    ctx.context.prompt = await realizeBlackCard(guildid, card, players);
+    const blanks = countBlanks(await getBlackCard(guildid, ctx.context.prompt));
 
     // Remove played cards
     if (!ctx.context.quiplash) {
@@ -74,7 +74,7 @@ export function prepareRound({ ctx, game, players }: FullContext<GameContext>): 
                     }]})
                     return false;
                 } else {
-                    hand.push(realizeWhiteCard(card, players));
+                    hand.push(await realizeWhiteCard(guildid, card, players));
                 }
             }
 
@@ -108,12 +108,12 @@ export function prepareRound({ ctx, game, players }: FullContext<GameContext>): 
                 }]})
                 return false;
             } else {
-                hand.push(realizeWhiteCard(card, players));
+                hand.push(await realizeWhiteCard(guildid, card, players));
             }
         }
 
         if (ctx.context.quiplash) {
-            ctx.context.playing[randoId] = hand.map(getWhiteCard);
+            ctx.context.playing[randoId] = await Promise.all(hand.map(c => getWhiteCard(guildid, c)));
         } else {
             ctx.context.hand[randoId] = hand;
             ctx.context.playing[randoId] = [...Array(blanks).keys()];
@@ -125,7 +125,7 @@ export function prepareRound({ ctx, game, players }: FullContext<GameContext>): 
 }
 
 export const joinLeaveLogic: Logic<void, GameContext> = {
-    onEvent({ ctx, game, players }, event, resolve) {
+    async onEvent({ ctx, game, players, guildid }, event, resolve) {
         if (event.type !== 'interaction') return;
 
         const i = event.interaction;
@@ -156,10 +156,10 @@ export const joinLeaveLogic: Logic<void, GameContext> = {
                 const hand: Card[] = [];
                 while (hand.length < ctx.context.handCards) {
                     const card = ctx.context.whiteDeck.pop()!;
-                    hand.push(realizeWhiteCard(card, players));
+                    hand.push(await realizeWhiteCard(guildid, card, players));
                 }
 
-                const blanks = countBlanks(getBlackCard(ctx.context.prompt));
+                const blanks = countBlanks(await getBlackCard(guildid, ctx.context.prompt));
                 ctx.context.hand[i.user.id] = hand;
                 ctx.context.playing[i.user.id] = Array(blanks).fill(null);
             }
