@@ -1,3 +1,4 @@
+import { ButtonStyle, ComponentType } from "discord.js";
 import { escapeDiscord } from "../../util/card";
 import { MessageOptions } from "../../util/message";
 import { Logic, telephone } from "../logic";
@@ -22,10 +23,10 @@ function message(ctx: WritingContext): MessageOptions {
             value: `${ctx.current ? '> ' + ctx.current + '\n\n' : ''}*Type your sentence below.*`
         }]}],
         components: [{
-            type: 'ACTION_ROW',
+            type: ComponentType.ActionRow,
             components: [{
-                type: 'BUTTON',
-                style: ctx.current ? 'PRIMARY' : 'SECONDARY',
+                type: ComponentType.Button,
+                style: ctx.current ? ButtonStyle.Primary : ButtonStyle.Secondary,
                 label: 'Cancel',
                 customId: 'cancel',
                 disabled: !ctx.current,

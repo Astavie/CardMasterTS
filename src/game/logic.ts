@@ -1,5 +1,5 @@
 import { Awaitable } from "@discordjs/builders";
-import { CommandInteraction, Message, MessageComponentInteraction, ModalSubmitInteraction, Snowflake, User } from "discord.js";
+import { CommandInteraction, Message, MessageComponentInteraction, ModalMessageModalSubmitInteraction, Snowflake, User } from "discord.js";
 import { MessageOptions } from "../util/message";
 
 export type MessageGenerator = (user: User | null) => Awaitable<MessageOptions>;
@@ -19,7 +19,7 @@ export type Game = {
     closeMessage (players: User[], message?: MessageGenerator | MessageOptions, i?: UserInteraction, keepSpectators?: boolean): Promise<void>;
 }
 
-export type UserInteraction = MessageComponentInteraction | ModalSubmitInteraction;
+export type UserInteraction = MessageComponentInteraction | ModalMessageModalSubmitInteraction;
 
 export type Resolve<T> = (t: T) => void;
 
@@ -72,7 +72,7 @@ export function sequence<T, S>(logicmap: LogicMap<T, S>): Logic<T, SequenceConte
             return logicmap[full.ctx.state].onExit?.({ ...full, ctx: full.ctx.context });
         },
     }, async (full, t, resolve, old, logic) => {
-        if (t && 'state' in t) {
+        if (t && typeof t === 'object' && 'state' in t) {
             await logic.onExit?.(full);
             full.ctx.context = t.context;
             full.ctx.state   = t.state;

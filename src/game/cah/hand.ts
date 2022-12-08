@@ -1,4 +1,4 @@
-import { BaseMessageComponentOptions, EmbedFieldData, MessageActionRowOptions, MessageButtonOptions, MessageComponentInteraction, ModalSubmitInteraction, User } from 'discord.js';
+import { ActionRowData, APIEmbedField, ButtonComponentData, ButtonStyle, ComponentType, MessageActionRowComponentData, MessageComponentInteraction, ModalMessageModalSubmitInteraction, TextInputModalData, User } from 'discord.js';
 import { countBlanks, escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { FullContext, Logic, Resolve, singleResolve } from '../logic';
@@ -8,8 +8,8 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
     let prompt = await getBlackCard(guildid, ctx.prompt);
     const blanks = countBlanks(prompt);
     
-    const fields: EmbedFieldData[] = [];
-    const components: (Required<MessageActionRowOptions>)[] = [];
+    const fields: APIEmbedField[] = [];
+    const components: ActionRowData<MessageActionRowComponentData>[] = [];
 
     const allPlaying = Object.entries(ctx.playing).filter(([k, _v]) => k !== randoId).map(([_k, v]) => v);
     const playedCards = ctx.quiplash ? allPlaying.filter(p => p !== null).length : allPlaying.filter(p => !p.includes(null)).length;
@@ -44,11 +44,11 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
                 value: (await Promise.all(ctx.doubleornothing[player.id].cards.map(c => getWhiteCard(guildid, c)))).join('\n'),
             })
 
-            const playingStyle    = (playing !== 'double' && !playing.includes(null)) ? 'SUCCESS' : 'PRIMARY';
+            const playingStyle    = (playing !== 'double' && !playing.includes(null)) ? ButtonStyle.Success : ButtonStyle.Primary;
             const disableUnplayed = (playing !== 'double' && !playing.includes(null)) && blanks > 1;
 
             components.push(...createButtonGrid(ctx.handCards, i => ({
-                style: playing !== 'double' && playing.includes(i) ? playingStyle : 'SECONDARY',
+                style: playing !== 'double' && playing.includes(i) ? playingStyle : ButtonStyle.Secondary,
                 label: (i + 1).toString(),
                 customId: `hand_${i}`,
                 disabled: disableUnplayed && !playing.includes(i),
@@ -60,16 +60,16 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
             if (playing !== 'random' && playing !== null) prompt = fillBlanks(prompt, playing);
 
             components.push({
-                type: 'ACTION_ROW',
+                type: ComponentType.ActionRow,
                 components: [{
-                    type: 'BUTTON',
-                    style: playing === 'random' || playing === null ? 'SECONDARY' : 'SUCCESS',
+                    type: ComponentType.Button,
+                    style: playing === 'random' || playing === null ? ButtonStyle.Secondary : ButtonStyle.Success,
                     label: 'Fill',
                     customId: 'fill',
                     disabled: playing === 'random',
                 }, {
-                    type: 'BUTTON',
-                    style: playing === 'random' ? 'SUCCESS' : 'SECONDARY',
+                    type: ComponentType.Button,
+                    style: playing === 'random' ? ButtonStyle.Success : ButtonStyle.Secondary,
                     label: 'Random',
                     customId: 'random',
                     disabled: false,
@@ -88,22 +88,22 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
     });
 
     if (player) {
-        const buttons: (Required<BaseMessageComponentOptions> & MessageButtonOptions)[] = [{
-            type: 'BUTTON',
+        const buttons: ButtonComponentData[] = [{
+            type: ComponentType.Button,
             customId: '_leave',
-            style: 'DANGER',
+            style: ButtonStyle.Danger,
             label: 'Leave',
         }];
         if (player !== players[ctx.czar] && !ctx.quiplash && ctx.doubleornothing && player.id in ctx.doubleornothing) {
             buttons.unshift({
-                type: 'BUTTON',
+                type: ComponentType.Button,
                 customId: 'double',
-                style: ctx.playing[player.id] === 'double' ? 'SUCCESS' : 'SECONDARY',
+                style: ctx.playing[player.id] === 'double' ? ButtonStyle.Success : ButtonStyle.Secondary,
                 label: 'Double or nothing' + '!'.repeat(ctx.doubleornothing[player.id].amount),
             });
         }
         components.push({
-            type: 'ACTION_ROW',
+            type: ComponentType.ActionRow,
             components: buttons,
         });
     }
@@ -208,7 +208,7 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
                         }
                     }
                 } else if (i.isModalSubmit() && i.customId === 'fill_modal') {
-                    ctx.playing[i.user.id] = (i as ModalSubmitInteraction).components.map(c => escapeDiscord(c.components[0].value));
+                    ctx.playing[i.user.id] = (i as ModalMessageModalSubmitInteraction).components.map(c => escapeDiscord((c.components[0] as TextInputModalData).value));
                     resolveWhenPlayersDone(full, i, resolve);
                 }
             }
@@ -226,7 +226,7 @@ function allPlayersDone(ctx: RoundContext): boolean {
     }
 }
 
-async function resolveWhenPlayersDone(full: FullContext<RoundContext>, i: MessageComponentInteraction | ModalSubmitInteraction | undefined, resolve: Resolve<void>) {
+async function resolveWhenPlayersDone(full: FullContext<RoundContext>, i: MessageComponentInteraction | ModalMessageModalSubmitInteraction | undefined, resolve: Resolve<void>) {
     const { game, ctx, players, guildid } = full;
     if (allPlayersDone(ctx)) {
         // put random cards in

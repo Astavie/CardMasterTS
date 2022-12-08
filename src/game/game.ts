@@ -1,4 +1,4 @@
-import { Client, ColorResolvable, CommandInteraction, Message, MessageEmbedOptions, Snowflake, TextBasedChannel, User } from "discord.js";
+import { APIEmbed, Client, CommandInteraction, Message, Snowflake, TextBasedChannel, User } from "discord.js";
 import { shuffle } from "../util/card";
 import { disableButtons, MessageController, MessageOptions, MessageSave } from "../util/message";
 import { Serializable } from "../util/saving";
@@ -34,7 +34,7 @@ const testerSetup = new SetupLogic<ContextOf<typeof testedLogic>, []>([], {}, ({
 
 const logicTester: GameType<unknown> = {
     name: "tester",
-    color: "AQUA",
+    color: 0x00FFFF,
     logic: sequence({
         setup: forward(testerSetup, 'game'),
         game: testedLogic,
@@ -47,7 +47,7 @@ addGame(logicTester);
 // Impl
 export type GameType<C> = {
     name: string,
-    color: ColorResolvable,
+    color: number,
     logic: Logic<unknown, C>,
     initialContext(): C,
 }
@@ -106,7 +106,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
         if (data.lobby) promises.push(
             client.channels.fetch(data.lobby).then(c => {
-                if (!c?.isText()) throw new Error();
+                if (!c?.isTextBased()) throw new Error();
                 this.lobby = c;
             })
         );
@@ -273,7 +273,7 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             if (!m) return undefined;
 
             const options = {
-                embeds: m.embeds as MessageEmbedOptions[],
+                embeds: m.embeds as APIEmbed[],
                 components: m.components && disableButtons(m.components),
             };
             return options;

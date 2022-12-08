@@ -1,4 +1,4 @@
-import { EmbedFieldData, MessageActionRowOptions, User } from 'discord.js';
+import { ActionRowData, APIEmbedField, ButtonStyle, ComponentType, MessageActionRowComponentData, User } from 'discord.js';
 import { bolden, countBlanks, fillBlanks } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { FullContext, Logic } from '../logic';
@@ -35,21 +35,21 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
 
     const message = `Card Czar: ${players[ctx.czar]}\n\n> ${await getBlackCard(guildid, ctx.prompt)}\n\n${answers}`;
     
-    const components: (Required<MessageActionRowOptions>)[] = [];
+    const components: ActionRowData<MessageActionRowComponentData>[] = [];
     if (players[ctx.czar] === player) {
         components.push(...createButtonGrid(ctx.shuffle.length, i => ({
-            style: 'PRIMARY',
+            style: ButtonStyle.Primary,
             label: (i + 1).toString(),
             customId: `answer_${i}`,
         })));
     }
     if (player) {
         components.push({
-            type: 'ACTION_ROW',
+            type: ComponentType.ActionRow,
             components: [{
-                type: 'BUTTON',
+                type: ComponentType.Button,
                 customId: '_leave',
-                style: 'DANGER',
+                style: ButtonStyle.Danger,
                 label: 'Leave',
             }]
         });
@@ -116,7 +116,7 @@ export const readLogic: Logic<void, RoundContext> = {
                     }
                 }
                 
-                const fields: EmbedFieldData[] = [{
+                const fields: APIEmbedField[] = [{
                     name: 'Round winner',
                     value: `${serializePlayer(winner)}\n\n${answer}`,
                 },{

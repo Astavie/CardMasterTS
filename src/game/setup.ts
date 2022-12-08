@@ -1,5 +1,5 @@
 import { Awaitable } from '@discordjs/builders';
-import { ButtonInteraction, EmojiIdentifierResolvable, MessageActionRowOptions, MessageEmbedOptions, SelectMenuInteraction } from 'discord.js'
+import { ActionRowData, APIEmbed, ButtonInteraction, ButtonStyle, ComponentEmojiResolvable, ComponentType, MessageActionRowComponentData, StringSelectMenuInteraction } from 'discord.js'
 import { MessageOptions } from '../util/message'
 import { Event, FullContext, Logic, Resolve } from './logic'
 
@@ -26,7 +26,7 @@ export type MultiChoice = {
 export type ChoiceOption = {
     label: string;
     description?: string;
-    emoji?: EmojiIdentifierResolvable;
+    emoji?: ComponentEmojiResolvable;
 }
 
 export type Number = {
@@ -49,11 +49,11 @@ type Override<T extends readonly Arg[]> = { [A in T[number] as A['name']]?:
     A extends MultiChoice ? (full: FullContext<SetupContext<T>>) => ChoiceOption[] : never
 };
 
-export type SetupMessageGenerator<A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>) => MessageEmbedOptions;
+export type SetupMessageGenerator<A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>) => APIEmbed;
 
 export type GameStarter<T, A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>, i: ButtonInteraction) => Awaitable<T | null>
 
-function defaultMessageGenerator({ players }: FullContext<unknown>): MessageEmbedOptions {
+function defaultMessageGenerator({ players }: FullContext<unknown>): APIEmbed {
     return {
         fields: [{
             name: 'Players',
@@ -78,17 +78,17 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
 
     message(full: FullContext<SetupContext<A>>): MessageOptions {
         const embeds = [this.generator(full)];
-        const components: (Required<MessageActionRowOptions>)[] = [];
+        const components: ActionRowData<MessageActionRowComponentData>[] = [];
         const ctx = full.ctx;
 
         for (const arg of this.args) {
-            const row: Required<MessageActionRowOptions> = {
-                type: 'ACTION_ROW',
+            const row: ActionRowData<MessageActionRowComponentData> = {
+                type: ComponentType.ActionRow,
                 components: [{
-                    type: 'BUTTON',
+                    type: ComponentType.Button,
                     customId: `_${arg.name}_`,
                     label: arg.name,
-                    style: 'PRIMARY',
+                    style: ButtonStyle.Primary,
                     disabled: true,
                 }],
             }
@@ -101,10 +101,10 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
                     values = this.override[arg.name](full);
                 }
                 values.forEach((value, i) => row.components.push({
-                    type: 'BUTTON',
+                    type: ComponentType.Button,
                     customId: `_${arg.name}_${i}`,
                     label: value,
-                    style: (ctx[arg.name] as boolean[])[i] ? 'SUCCESS' : 'SECONDARY',
+                    style: (ctx[arg.name] as boolean[])[i] ? ButtonStyle.Success : ButtonStyle.Secondary,
                 }));
                 break;
             case 'choice':
@@ -113,7 +113,7 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
                     values2 = this.override[arg.name](full);
                 }
                 row.components = [{
-                    type: 'SELECT_MENU',
+                    type: ComponentType.StringSelect,
                     customId: `_${arg.name}_`,
                     minValues: arg.min,
                     maxValues: Math.min(values2.length, arg.max),
@@ -127,19 +127,19 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
                 break;
             case 'number':
                 row.components.push({
-                    type: 'BUTTON',
-                    style: 'PRIMARY',
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Primary,
                     label: '◀',
                     customId: `_${arg.name}_dec`,
                     disabled: (ctx[arg.name] as number) <= arg.min,
                 },{
-                    type: 'BUTTON',
-                    style: 'SECONDARY',
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Secondary,
                     label: (ctx[arg.name] as number).toString(),
                     customId: `_${arg.name}_def`,
                 },{
-                    type: 'BUTTON',
-                    style: 'PRIMARY',
+                    type: ComponentType.Button,
+                    style: ButtonStyle.Primary,
                     label: '▶',
                     customId: `_${arg.name}_inc`,
                     disabled: (ctx[arg.name] as number) >= arg.max,
@@ -149,27 +149,27 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
         }
 
         components.push({
-            type: 'ACTION_ROW',
+            type: ComponentType.ActionRow,
             components: [{
-                type: 'BUTTON',
+                type: ComponentType.Button,
                 customId: '_join',
                 label: 'Join',
-                style: 'SUCCESS',
+                style: ButtonStyle.Success,
             },{
-                type: 'BUTTON',
+                type: ComponentType.Button,
                 customId: '_leave',
                 label: 'Leave',
-                style: 'DANGER',
+                style: ButtonStyle.Danger,
             },{
-                type: 'BUTTON',
+                type: ComponentType.Button,
                 customId: '_start',
                 label: 'Start',
-                style: 'PRIMARY',
+                style: ButtonStyle.Primary,
             },{
-                type: 'BUTTON',
+                type: ComponentType.Button,
                 customId: '_close',
                 label: 'Close',
-                style: 'PRIMARY',
+                style: ButtonStyle.Secondary,
             }],
         });
 
@@ -246,11 +246,11 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
                 }
                 break;
             case 'choice':
-                (ctx[arg.name] as number[]) = (event.interaction as SelectMenuInteraction).values.map(value => parseInt(value));
+                (ctx[arg.name] as number[]) = (event.interaction as StringSelectMenuInteraction).values.map(value => parseInt(value));
                 break;
             }
             
-            game.updateLobby(this.message(full));
+            game.updateLobby(this.message(full), event.interaction);
             break;
         }
     }

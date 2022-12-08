@@ -3,12 +3,12 @@ import { config } from "dotenv";
 config();
 
 // Require the necessary discord.js classes
-import { Client, Intents } from 'discord.js';
+import { ChannelType, Client, GatewayIntentBits } from 'discord.js';
 import { GameImpl, games, gametypes } from "./game/game";
 import { createSave, db, loadGames, saveGames } from "./db";
 
 // Create a new client instance
-const client = new Client({ intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.DIRECT_MESSAGES] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages] });
 
 // When the client is ready, run this code (only once)
 client.once('ready', async () => {
@@ -35,12 +35,12 @@ client.on('error', e => {
 });
 
 client.on('messageCreate', message => {
-    if (message.channel.type !== 'DM' || message.author.bot) return;
-    const player = message.channel.recipient;
+    if (message.channel.type !== ChannelType.DM || message.author.bot) return;
+    const player = message.channel.recipientId;
 
     for (const guildgames of Object.values(games)) {
         for (const game of guildgames) {
-            if (game.players.includes(player)) {
+            if (game.players.some(p => p.id === player)) {
                 game.onMessage(message);
                 return;
             }
@@ -51,12 +51,12 @@ client.on('messageCreate', message => {
 client.on('messageUpdate', async message_ => {
     const message = await message_.fetch();
 
-    if (message.channel.type !== 'DM' || message.author.bot) return;
-    const player = message.channel.recipient;
+    if (message.channel.type !== ChannelType.DM || message.author.bot) return;
+    const player = message.channel.recipientId;
 
     for (const guildgames of Object.values(games)) {
         for (const game of guildgames) {
-            if (game.players.includes(player)) {
+            if (game.players.some(p => p.id === player)) {
                 game.onMessage(message);
                 return;
             }
@@ -66,7 +66,7 @@ client.on('messageUpdate', async message_ => {
 
 // On commands
 client.on('interactionCreate', interaction => {
-    if (interaction.isMessageComponent() || interaction.isModalSubmit()) {
+    if (interaction.isMessageComponent() || (interaction.isModalSubmit() && interaction.isFromMessage())) {
         for (const guildgames of Object.values(games)) {
             for (const game of guildgames) {
                 if (game.isMyInteraction(interaction)) {
@@ -77,7 +77,7 @@ client.on('interactionCreate', interaction => {
         }
     }
     
-    if (!interaction.isCommand()) return;
+    if (!interaction.isChatInputCommand()) return;
 
     switch (interaction.commandName) {
         case "ping":

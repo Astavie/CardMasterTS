@@ -1,6 +1,6 @@
 .env
 node_modules/
 db.json
-src/game/cah/packs/eppgroep.ts
 db/
 build/
+eppgroep.json

@@ -1,4 +1,4 @@
-import { MessageComponentInteraction } from "discord.js";
+import { ComponentType, MessageComponentInteraction, TextInputStyle } from "discord.js";
 
 // A generic card supports two types of empty spots
 // '_'  (a blank) gets replaced with some text defined by the game/user
@@ -98,11 +98,11 @@ export function fillModal(prompt: string, i: MessageComponentInteraction, custom
         customId,
         title: "Fill in the blanks",
         components: split.map((s, i) => ({
-            type: "ACTION_ROW",
+            type: ComponentType.ActionRow,
             components: [{
-                type: "TEXT_INPUT",
+                type: ComponentType.TextInput,
                 customId: `blank_${i}`,
-                style: "SHORT",
+                style: TextInputStyle.Short,
                 label: s
             }]
         }))
