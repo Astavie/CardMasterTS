@@ -17,7 +17,7 @@ function base64(i: number): string {
 }
 
 export function createSave(guild: Snowflake): Save {
-    const p = path.join(process.cwd(), "db", guild);
+    const p = path.join(process.cwd(), "..", "db", guild);
     return { path: p, packs: {}, games: [] };
 }
 
