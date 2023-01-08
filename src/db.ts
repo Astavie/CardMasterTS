@@ -16,9 +16,12 @@ function base64(i: number): string {
     return Buffer.from([i>>24, i>>16, i>>8, i]).toString('base64').substring(0, 6).replaceAll('/', '_');
 }
 
+function getFolder(guild: Snowflake): string {
+    return path.join(process.cwd(), "..", "db", guild);
+}
+
 export function createSave(guild: Snowflake): Save {
-    const p = path.join(process.cwd(), "..", "db", guild);
-    return { path: p, packs: {}, games: [] };
+    return { path: getFolder(guild), packs: {}, games: [] };
 }
 
 export function saveGames(save: Save) {
@@ -30,18 +33,18 @@ export function saveGames(save: Save) {
 }
 
 export function refreshPack(guild: Snowflake, pack: string) {
-    const p = path.join(process.cwd(), "db", guild, "packs", pack + ".json");
+    const p = path.join(getFolder(guild), "packs", pack + ".json");
     if (existsSync(p)) rmSync(p);
 }
 
 const promises: {[key:string]:Promise<void>} = {}
 
 export async function loadPack(guild: Snowflake, pack: string): Promise<{ name: string, rawname: string, cards: any }> {
-    const p = path.join(process.cwd(), "db", guild, "packs", pack + ".json");
+    const p = path.join(getFolder(guild), "packs", pack + ".json");
     if (!existsSync(p)) {
         if (!(pack in promises)) {
             const timestamp = base64(Date.now());
-            const exportPath = path.join(process.cwd(), "db", guild, "packs", timestamp + ".json");
+            const exportPath = path.join(getFolder(guild), "packs", timestamp + ".json");
 
             const url = db[guild].packs[pack];
             if (!url) {
