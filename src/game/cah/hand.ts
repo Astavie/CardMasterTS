@@ -116,10 +116,6 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
 }
 
 export const handLogic: Logic<void, RoundContext> = singleResolve({
-    async onExit({ game, players }) {
-        // do not close spectator message
-        await game.closeMessage(players, undefined, undefined, false);
-    },
     async onEvent(full, event, resolve) {
         const { ctx, players, game, guildid } = full;
         switch (event.type) {
@@ -248,7 +244,8 @@ async function resolveWhenPlayersDone(full: FullContext<RoundContext>, i: Messag
         ctx.shuffle = shuffle(Object.keys(ctx.playing));
 
         // next part!
-        game.closeMessage(players, p => message(full, p), i, false).then(resolve);
+        await game.closeMessage(players, p => message(full, p), i, false);
+        resolve();
     } else {
         game.updateMessage(players, p => message(full, p), i);
     }

@@ -2,7 +2,7 @@ import { randomInt } from "crypto";
 import { Snowflake, User } from "discord.js";
 import { countRealizations, realizeCard } from "../../util/card";
 import { GameType } from "../game";
-import { ContextOf, forward, LogicMap, loop, next, or, sequence, singleResolve } from "../logic";
+import { ContextOf, forward, LogicMap, loop, next, or, sequence, singleResolve, then } from "../logic";
 import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
@@ -108,9 +108,9 @@ export type QuiplashRoundContext = BaseRoundContext & {
 
 export type RoundContext = CardRoundContext | QuiplashRoundContext;
 
-const roundMap: LogicMap<void, Record<'hand' | 'read', RoundContext>> = {
+const roundMap: LogicMap<true, Record<'hand' | 'read', RoundContext>> = {
     hand: next(handLogic, 'read'),
-    read: readLogic
+    read: then(readLogic, (_full, _void, resolve) => resolve(true))
 }
 
 const roundLogic = sequence(roundMap); 

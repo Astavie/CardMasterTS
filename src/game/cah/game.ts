@@ -2,19 +2,15 @@ import { countBlanks } from '../../util/card';
 import { FullContext, Logic } from '../logic';
 import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
-export async function prepareRound({ ctx, game, players, guildid }: FullContext<GameContext>): Promise<boolean> {
+export async function prepareRound({ ctx, game, players, guildid }: FullContext<GameContext>, resume: boolean): Promise<boolean> {
+    if (!resume) {
+        return false;
+    }
+
     // Check if someone won
     if (Object.values(ctx.context.points).some(points => points >= ctx.context.maxPoints)) {
         return false;
     }   
-
-    // Chck if enough players
-    if (players.length < 2) {
-        await game.send(players, { embeds: [{
-            description: '**The game has ended because there were not enough players left.**'
-        }]})
-        return false;
-    }
 
     // Set czar
     ctx.context.czar += 1;
@@ -124,7 +120,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
     return true;
 }
 
-export const joinLeaveLogic: Logic<void, GameContext> = {
+export const joinLeaveLogic: Logic<boolean, GameContext> = {
     async onEvent({ ctx, game, players, guildid }, event, resolve) {
         if (event.type !== 'interaction') return;
 
@@ -171,6 +167,16 @@ export const joinLeaveLogic: Logic<void, GameContext> = {
                 return;
             }
 
+            // check if this ends the game
+            if (players.length === 2) {
+                game.closeMessage(players, undefined, i);
+                await game.send(players, { embeds: [{
+                    description: '**The game has ended because there were not enough players left.**'
+                }]})
+                resolve(false);
+                return;
+            }
+            
             // put player cards back
             if (!ctx.context.quiplash) {
                 ctx.context.whiteDeck.push(...ctx.context.hand[i.user.id]);
@@ -184,19 +190,13 @@ export const joinLeaveLogic: Logic<void, GameContext> = {
             const sindex = ctx.context.shuffle.indexOf(i.user.id);
             if (sindex !== -1) ctx.context.shuffle.splice(sindex, 1);
 
-            // check if this ends the game
-            if (players.length < 2) {
-                resolve();
-                return;
-            }
-
             // update czar
             if (ctx.context.czar === index) {
                 ctx.context.czar -= 1;
                 game.send(players, { embeds: [{
                     description: '**The round has been skipped because the Card Czar left the game.**'
                 }]});
-                game.closeMessage([...players, i.user]).then(resolve);
+                game.closeMessage([...players, i.user], undefined, i).then(() => resolve(true));
                 return;
             } else {
                 if (ctx.context.czar > index) {
