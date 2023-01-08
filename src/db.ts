@@ -40,12 +40,15 @@ export function refreshPack(guild: Snowflake, pack: string) {
 const promises: {[key:string]:Promise<void>} = {}
 
 export async function loadPack(guild: Snowflake, pack: string): Promise<{ name: string, rawname: string, cards: any }> {
-    mkdirSync(path.join(getFolder(guild), "packs"));
-    const p = path.join(getFolder(guild), "packs", pack + ".json");
+    const packs = path.join(getFolder(guild), "packs")
+    if (!existsSync(packs)) {
+        mkdirSync(packs, { recursive: true });
+    }
+    const p = path.join(packs, pack + ".json");
     if (!existsSync(p)) {
         if (!(pack in promises)) {
             const timestamp = base64(Date.now());
-            const exportPath = path.join(getFolder(guild), "packs", timestamp + ".json");
+            const exportPath = path.join(packs, timestamp + ".json");
 
             const url = db[guild].packs[pack];
             if (!url) {
