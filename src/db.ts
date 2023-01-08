@@ -47,8 +47,6 @@ export async function loadPack(guild: Snowflake, pack: string): Promise<{ name: 
     const p = path.join(packs, pack + ".json");
     if (!existsSync(p)) {
         if (!(pack in promises)) {
-            const timestamp = base64(Date.now());
-            const exportPath = path.join(packs, timestamp + ".json");
 
             const url = db[guild].packs[pack];
             if (!url) {
@@ -60,6 +58,12 @@ export async function loadPack(guild: Snowflake, pack: string): Promise<{ name: 
                 if (!res.body) {
                     throw new Error();
                 }
+
+                let ms = Date.now()
+                while (existsSync(path.join(packs, base64(ms) + ".json"))) ms += 1;
+                const timestamp = base64(ms);
+                const exportPath = path.join(packs, timestamp + ".json");
+
                 const fileStream = createWriteStream(exportPath);
                 await new Promise((resolve, reject) => {
                     res.body!.pipe(fileStream);

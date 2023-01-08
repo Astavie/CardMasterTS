@@ -10,7 +10,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
 
     // Chck if enough players
     if (players.length < 2) {
-        game.send(players, { embeds: [{
+        await game.send(players, { embeds: [{
             description: '**The game has ended because there were not enough players left.**'
         }]})
         return false;
@@ -23,7 +23,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
     // Get black card
     const card = ctx.context.blackDeck.pop();
     if (!card) {
-        game.send(players, { embeds: [{
+        await game.send(players, { embeds: [{
             description: '**The game has ended because the black deck ran out of cards.**'
         }]});
         return false;
@@ -69,7 +69,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
             while (hand.length < ctx.context.handCards) {
                 const card = ctx.context.whiteDeck.pop();
                 if (!card) {
-                    game.send(players, { embeds: [{
+                    await game.send(players, { embeds: [{
                         description: '**The game has ended because the white deck ran out of cards.**'
                     }]})
                     return false;
@@ -103,7 +103,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
         while (hand.length < blanks) {
             const card = ctx.context.whiteDeck.pop();
             if (!card) {
-                game.send(players, { embeds: [{
+                await game.send(players, { embeds: [{
                     description: '**The game has ended because the white deck ran out of cards.**'
                 }]})
                 return false;
@@ -215,8 +215,8 @@ export const gameResultLogic: Logic<void, GameContext> = {
             resolve();
         }  
     },
-    onExit({ ctx, game, players }) {
-        game.closeLobby();
+    async onExit({ ctx, game, players }) {
+        await game.closeLobby();
 
         let winner = "";
         let maxPoints = 0;
@@ -229,18 +229,18 @@ export const gameResultLogic: Logic<void, GameContext> = {
 
         if (maxPoints > 0) {
             if (winner === randoId) {
-                game.send(players, { embeds: [{ fields: [{
+                await game.send(players, { embeds: [{ fields: [{
                     name: 'We have a winner!',
                     value: `\`Rando Cardrissian\` won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}. All players should go home in a state of everlasting shame.`,
                 }]}]})
             } else {
-                game.send(players, { embeds: [{ fields: [{
+                await game.send(players, { embeds: [{ fields: [{
                     name: 'We have a winner!',
                     value: `<@${winner}> won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}.`,
                 }]}]});
             }
         } else {
-            game.send(players, { embeds: [{
+            await game.send(players, { embeds: [{
                 description: '**No winner could be declared.**'
             }]});
         }
