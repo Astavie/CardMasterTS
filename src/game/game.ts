@@ -127,9 +127,8 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         } catch (error) {
             const now = new Date().toLocaleString();
             console.error(`--- ERROR ---`);
-            console.error(`at ${now}`);
             console.error(error);
-            console.error(`encountered while ending a game of "${this.type.name}" inside guild ${this.guild}`);
+            console.error(`encountered while ending a game of "${this.type.name}" inside guild ${this.guild} at ${now}`);
             console.error(`game.context: ${JSON.stringify(this.context)}`)
             console.error(`-------------`);
 
@@ -149,9 +148,8 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         } catch (error) {
             const now = new Date().toLocaleString();
             console.error(`--- ERROR ---`);
-            console.error(`at ${now}`);
             console.error(error)
-            console.error(`encountered during a game of "${this.type.name}" inside guild ${this.guild}`);
+            console.error(`encountered during a game of "${this.type.name}" inside guild ${this.guild} at ${now}`);
             console.error(`event: ${JSON.stringify(event)}`)
             console.error(`game.context: ${JSON.stringify(this.context)}`)
             console.error(`-------------`);
