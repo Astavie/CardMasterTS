@@ -7,8 +7,8 @@ export type MessageGenerator = (user: User | null) => Awaitable<MessageOptions>;
 export type Game = {
     allowSpectators(): Promise<void>;
 
-    addPlayer   (player: User, i?: UserInteraction): boolean;
-    removePlayer(player: User, i?: UserInteraction): boolean;
+    addPlayer   (player: User, i?: UserInteraction): Promise<boolean>;
+    removePlayer(player: User, i?: UserInteraction): Promise<boolean>;
 
     send(players: User[], message: MessageGenerator | MessageOptions, sendSpectators?: boolean): Promise<void>;
 
@@ -21,7 +21,7 @@ export type Game = {
 
 export type UserInteraction = MessageComponentInteraction | ModalMessageModalSubmitInteraction;
 
-export type Resolve<T> = (t: T) => void;
+export type Resolve<T> = (t: T) => Promise<void>;
 
 export type FullContext<C> = {
     ctx: C,
@@ -48,8 +48,8 @@ export type Event = {
 }
 
 export type Logic<T, C> = {
-    onEvent?(full: FullContext<C>, event: Event, resolve: Resolve<T>): void,
-    onExit?(full: FullContext<C>): Awaitable<void>,
+    onEvent?(full: FullContext<C>, event: Event, resolve: Resolve<T>): Promise<void>,
+    onExit?(full: FullContext<C>): Promise<void>,
 }
 
 export type Next<K, V> = {
@@ -65,20 +65,20 @@ export type ReturnOf<T> = T extends Logic<infer T, unknown> ? T : never;
 
 export function sequence<T, S>(logicmap: LogicMap<T, S>): Logic<T, SequenceContext<S>> {
     return then({
-        onEvent(full, event, resolve: Resolve<T | SequenceContext<S>>) {
-            logicmap[full.ctx.state].onEvent?.({ ...full, ctx: full.ctx.context }, event, resolve);
+        async onEvent(full, event, resolve: Resolve<T | SequenceContext<S>>) {
+            await logicmap[full.ctx.state].onEvent?.({ ...full, ctx: full.ctx.context }, event, resolve);
         },
-        onExit(full) {
-            return logicmap[full.ctx.state].onExit?.({ ...full, ctx: full.ctx.context });
+        async onExit(full) {
+            await logicmap[full.ctx.state].onExit?.({ ...full, ctx: full.ctx.context });
         },
     }, async (full, t, resolve, old, logic) => {
         if (t && typeof t === 'object' && 'state' in t) {
             await logic.onExit?.(full);
             full.ctx.context = t.context;
             full.ctx.state   = t.state;
-            logic.onEvent?.(full, { type: 'update' }, old);
+            await logic.onEvent?.(full, { type: 'update' }, old);
         } else {
-            resolve(t);
+            await resolve(t);
         }
     });
 }
@@ -90,19 +90,19 @@ export type TelephoneContext<T, C> = AllContext<T, C> & {
 
 export function singleResolve<T, C>(logic: Logic<T, C>): Logic<T, C & { _resolve?: [any?]}> {
     return {
-        onEvent: logic.onEvent && ((full, event, resolve) => {
+        onEvent: logic.onEvent && (async (full, event, resolve) => {
             if (!full.ctx._resolve) full.ctx._resolve = [];
 
             const token = full.ctx._resolve;
-            logic.onEvent!(full, event, t => {
+            await logic.onEvent!(full, event, async t => {
                 if (token.length) return;
                 token.push(true);
-                resolve(t);
+                await resolve(t);
             });
         }),
-        onExit(full) {
+        async onExit(full) {
             delete full.ctx._resolve;
-            return logic.onExit?.(full);
+            await logic.onExit?.(full);
         },
     };
 }
@@ -139,7 +139,7 @@ export function telephone<T, A, B>(logic: Logic<T | null, B>, rounds: (ctx: A, p
                 }
 
                 // resolve
-                resolve(final);
+                await resolve(final);
             } else {
                 await logic.onExit?.(full);
                 for (let i = 0; i < full.ctx.shuffle.length; i++) {
@@ -152,7 +152,7 @@ export function telephone<T, A, B>(logic: Logic<T | null, B>, rounds: (ctx: A, p
                 full.ctx.shuffle.unshift(full.ctx.shuffle.pop()!);
                 
                 // continue
-                logic.onEvent?.(full, { type: 'update' }, old);
+                await logic.onEvent?.(full, { type: 'update' }, old);
             }
         }
     )
@@ -165,14 +165,14 @@ export type AllContext<T, C> = {
 
 export function all<T, A, B>(logic: Logic<T | null, B>, map: (ctx: AllContext<T, A>, player: User) => B): Logic<{[key:string]:T}, AllContext<T, A>> {
     return then(
-        or({
-            onEvent(full, event) {
+        or(
+            {async onEvent(full, event) {
                 if (event.type === 'remove') {
                     delete full.ctx.results[event.player.id];
                 }
             }},
             first(logic, map),
-        ), (full, [id, t], resolve, old, logic) => {
+        ), async (full, [id, t], resolve, old, logic) => {
             if (t === null) {
                 delete full.ctx.results[id];
             } else {
@@ -180,9 +180,9 @@ export function all<T, A, B>(logic: Logic<T | null, B>, map: (ctx: AllContext<T,
             }
 
             if (Object.keys(full.ctx.results).length === full.players.length) {
-                resolve(full.ctx.results);
+                await resolve(full.ctx.results);
             } else {
-                logic.onEvent?.({ ...full, players: full.players.filter(p => p.id !== id) }, { type: 'update' }, old);
+                await logic.onEvent?.({ ...full, players: full.players.filter(p => p.id !== id) }, { type: 'update' }, old);
             }
         },
     );
@@ -191,31 +191,31 @@ export function all<T, A, B>(logic: Logic<T | null, B>, map: (ctx: AllContext<T,
 export function first<T, A, B>(logic: Logic<T, B>, map: (ctx: A, player: User) => B): Logic<[string, T], A> {
     const l2 = then(logic, (full, t, resolve) => resolve([full.players[0].id, t]));
     return {
-        onEvent: l2.onEvent && ((full, event, resolve) => {
+        onEvent: l2.onEvent && (async (full, event, resolve) => {
             switch (event.type) {
                 case 'start':
                 case 'update':
                     for (const player of full.players) {
                         const ctx = map(full.ctx, player);
-                        l2.onEvent!({ ...full, players: [player], ctx }, event, resolve);
+                        await l2.onEvent!({ ...full, players: [player], ctx }, event, resolve);
                     }
                 break;
                 case 'interaction':
                     {
                         const ctx = map(full.ctx, event.interaction.user);
-                        l2.onEvent!({ ...full, players: [event.interaction.user], ctx }, event, resolve);
+                        await l2.onEvent!({ ...full, players: [event.interaction.user], ctx }, event, resolve);
                     }
                 break;
                 case 'dm':
                     {
                         const ctx = map(full.ctx, event.message.author);
-                        l2.onEvent!({ ...full, players: [event.message.author], ctx }, event, resolve);
+                        await l2.onEvent!({ ...full, players: [event.message.author], ctx }, event, resolve);
                     }
                 break;
                 case 'add':
                     {
                         const ctx = map(full.ctx, event.player);
-                        l2.onEvent!({ ...full, players: [event.player], ctx }, { type: 'update' }, resolve);
+                        await l2.onEvent!({ ...full, players: [event.player], ctx }, { type: 'update' }, resolve);
                     }
                 break;
             }
@@ -237,22 +237,24 @@ export function or<T, C>(...as: Logic<T, C>[]): Logic<T, C> {
     const rs: any[] = as.filter(a => a.onExit);
 
     return {
-        onEvent() {
-            for (const f of es) f.onEvent(...arguments)
+        async onEvent() {
+            const a: Promise<void>[] = [];
+            for (const f of es) a.push(f.onEvent(...arguments))
+            await Promise.all(a);
         },
         async onExit()  {
-            const a: Awaitable<void>[] = [];
+            const a: Promise<void>[] = [];
             for (const f of rs) a.push(f.onExit(...arguments))
             await Promise.all(a);
         },
     };
 }
 
-export function then<A, B, C>(a: Logic<A, C>, f: (full: FullContext<C>, a: A, resolve: Resolve<B>, old: Resolve<A>, logic: Logic<A, C>) => void): Logic<B, C> {
+export function then<A, B, C>(a: Logic<A, C>, f: (full: FullContext<C>, a: A, resolve: Resolve<B>, old: Resolve<A>, logic: Logic<A, C>) => Promise<void>): Logic<B, C> {
     const old = (full: FullContext<C>, t: A, resolve: Resolve<B>) => f(full, t, resolve, t => old(full, t, resolve), a);
     return {
-        onEvent: a.onEvent && ((full, event, resolve) => {
-            a.onEvent!(full, event, t => old(full, t, resolve));
+        onEvent: a.onEvent && (async (full, event, resolve) => {
+            await a.onEvent!(full, event, t => old(full, t, resolve));
         }),
         onExit: a.onExit,
     };
@@ -264,12 +266,11 @@ export function next<K, C>(a: Logic<unknown, C>, state: K): Logic<Next<K, C>, C>
 
 export function loop<T, C>(a: Logic<T, C>, f: (full: FullContext<C>, t: T) => Awaitable<boolean>): Logic<void, C> {
     return then(a, async (full, t, resolve, old, logic) => {
-        const ret = await f(full, t);
-        if (ret) {
+        if (await f(full, t)) {
             await logic.onExit?.(full);
-            logic.onEvent?.(full, { type: 'update' }, old);
+            await logic.onEvent?.(full, { type: 'update' }, old);
         } else {
-            resolve();
+            await resolve();
         }
     })
 }

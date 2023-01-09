@@ -96,7 +96,7 @@ async function startGame({ ctx, players, game, guildid }: FullContext<CAHSetupCo
     if (ctx['Rules'][0]) totalCards += blanks;
 
     if (whiteDeck.length < totalCards) {
-        i.reply({
+        await i.reply({
             content: 'There are not enough white cards in the selected packs to start the game.',
             ephemeral: true
         });
@@ -104,7 +104,7 @@ async function startGame({ ctx, players, game, guildid }: FullContext<CAHSetupCo
     }
 
     // LET'S GO
-    game.closeLobby(undefined, i, ['_join', '_leave', '_close']);
+    await game.closeLobby(undefined, i, ['_join', '_leave', '_close']);
     await game.allowSpectators();
 
     // rando's cards

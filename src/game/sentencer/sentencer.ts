@@ -42,21 +42,21 @@ const writing: Logic<string | null, WritingContext> = {
     async onEvent({ game, ctx, players }, event, resolve) {
         switch (event.type) {
         case 'update':
-            game.updateMessage(players, message(ctx), undefined, false);
+            await game.updateMessage(players, message(ctx), undefined, false);
         break;
         case 'interaction':
             switch (event.interaction.customId) {
             case 'cancel':
                 delete ctx.current;
-                game.updateMessage(players, message(ctx), event.interaction, false);
-                resolve(null);
+                await game.updateMessage(players, message(ctx), event.interaction, false);
+                await resolve(null);
             break;
             }
         break;
         case 'dm':
             ctx.current = escapeDiscord(event.message.content);
             await game.updateMessage(players, message(ctx), undefined, false);
-            resolve(ctx.current);
+            await resolve(ctx.current);
         break;
         }
     }

@@ -19,8 +19,8 @@ addGame(CAH);
 
 const testedLogic = writingTelephone;
 
-const testerSetup = new SetupLogic<ContextOf<typeof testedLogic>, []>([], {}, ({ players, game }, i) => {
-    game.closeLobby(undefined, i, ['_close']);
+const testerSetup = new SetupLogic<ContextOf<typeof testedLogic>, []>([], {}, async ({ players, game }, i) => {
+    await game.closeLobby(undefined, i, ['_close']);
     return {
         previous: Array(players.length).fill(null).map(() => []),
         context: {
@@ -114,15 +114,28 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         await Promise.all(promises);
     }
 
-    start(i: CommandInteraction) {
+    async start(i: CommandInteraction) {
         games[this.guild] ??= [];
         games[this.guild].push(this);
         this.lobby = i.channel!;
-        this.onEvent({ type: 'start', interaction: i });
+        await this.onEvent({ type: 'start', interaction: i });
     }
 
     async end() {
-        await this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild });
+        try {
+            await this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild })
+        } catch (error) {
+            const now = new Date().toLocaleString();
+            console.error(`--- ERROR ---`);
+            console.error(`at ${now}`);
+            console.error(error);
+            console.error(`encountered while ending a game of "${this.type.name}" inside guild ${this.guild}`);
+            console.error(`game.context: ${JSON.stringify(this.context)}`)
+            console.error(`-------------`);
+
+            await this.report(`An error occurred while closing the game\nPlease report this to Astavie#2920 with the timestamp ${now}`)
+        }
+        
         games[this.guild].splice(games[this.guild].indexOf(this), 1);
         
         if (this.lobby && this.lobby.isThread()) {
@@ -130,24 +143,56 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         }
     }
 
-    onEvent(event: Event) {
-        this.type.logic.onEvent?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild }, event, () => this.end());
+    async onEvent(event: Event) {
+        try {
+            await this.type.logic.onEvent?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild }, event, () => this.end())
+        } catch (error) {
+            const now = new Date().toLocaleString();
+            console.error(`--- ERROR ---`);
+            console.error(`at ${now}`);
+            console.error(error)
+            console.error(`encountered during a game of "${this.type.name}" inside guild ${this.guild}`);
+            console.error(`event: ${JSON.stringify(event)}`)
+            console.error(`game.context: ${JSON.stringify(this.context)}`)
+            console.error(`-------------`);
+            
+            await this.report(`An error occurred while running the game, causing the game to close prematurely\nPlease report this to Astavie#2920 with the timestamp ${now}`)
+            await this.end()
+        }
     }
+    
+    async report(message: string) {
+        let promises: Promise<unknown>[] = [];
 
-    addPlayer(player: User, i?: UserInteraction): boolean {
+        const p = this.lobby.send(message);
+        if (p) promises.push(p)
+
+        for (const player of this.players) {
+            promises.push((async () => {
+                (await player.createDM()).send(message);
+            })());
+        }
+
+        // Ignore any errors at this point
+        promises = promises.map(p => p.catch(() => {}));
+        
+        await Promise.all(promises);
+    }
+    
+    async addPlayer(player: User, i?: UserInteraction): Promise<boolean> {
         if (this.players.indexOf(player) !== -1) return false;
         
         this.players.push(player);
-        this.onEvent({ type: 'add', player, interaction: i });
+        await this.onEvent({ type: 'add', player, interaction: i });
         return true;
     }
 
-    removePlayer(player: User, i?: UserInteraction): boolean {
+    async removePlayer(player: User, i?: UserInteraction): Promise<boolean> {
         const idx = this.players.indexOf(player);
         if (idx === -1) return false;
 
         this.players.splice(idx, 1);
-        this.onEvent({ type: 'remove', player, interaction: i });
+        await this.onEvent({ type: 'remove', player, interaction: i });
         return true;
     }
 
@@ -162,15 +207,15 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         return this.stateMessage.isMyInteraction(i) || this.lobbyMessage.isMyInteraction(i);
     }
 
-    onMessage(m: Message) {
-        this.onEvent({ type: 'dm', message: m });
+    async onMessage(m: Message) {
+        await this.onEvent({ type: 'dm', message: m });
     }
 
-    onInteraction(i: UserInteraction) {
+    async onInteraction(i: UserInteraction) {
         if (i.isButton() && (i.customId === '_prevpage' || i.customId === '_nextpage')) {
-            this.stateMessage.flipPage(i);
+            await this.stateMessage.flipPage(i);
         } else {
-            this.onEvent({ type: 'interaction', interaction: i });
+            await this.onEvent({ type: 'interaction', interaction: i });
         }
     }
 

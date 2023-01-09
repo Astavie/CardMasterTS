@@ -51,7 +51,7 @@ type Override<T extends readonly Arg[]> = { [A in T[number] as A['name']]?:
 
 export type SetupMessageGenerator<A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>) => APIEmbed;
 
-export type GameStarter<T, A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>, i: ButtonInteraction) => Awaitable<T | null>
+export type GameStarter<T, A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>, i: ButtonInteraction) => Promise<T | null>
 
 function defaultMessageGenerator({ players }: FullContext<unknown>): APIEmbed {
     return {
@@ -180,7 +180,7 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
         };
     }
 
-    onEvent(_full: FullContext<Partial<SetupContext<A>>>, event: Event, resolve: Resolve<T | null>): void {
+    async onEvent(_full: FullContext<Partial<SetupContext<A>>>, event: Event, resolve: Resolve<T | null>) {
         const full = _full as unknown as FullContext<SetupContext<A>>;
         const { ctx, game } = full;
 
@@ -189,36 +189,34 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
             for (const arg of this.args) {
                 if (!ctx[arg.name]) ctx[arg.name] = arg.default;
             }
-            game.updateLobby(this.message(full), event.interaction);
+            await game.updateLobby(this.message(full), event.interaction);
             break;
         case 'interaction':
             switch (event.interaction.customId) {
             case '_close':
-                game.closeLobby(undefined, event.interaction);
-                resolve(null);
+                await game.closeLobby(undefined, event.interaction);
+                await resolve(null);
                 return;
             case '_join':
-                if (game.addPlayer(event.interaction.user)) {
-                    game.updateLobby(this.message(full), event.interaction);
+                if (await game.addPlayer(event.interaction.user)) {
+                    await game.updateLobby(this.message(full), event.interaction);
                 } else {
-                    event.interaction.reply({
+                    await event.interaction.reply({
                         content: 'You have already joined!',
                         ephemeral: true
                     });
                 }
                 return;
             case '_leave':
-                if (game.removePlayer(event.interaction.user)) {
-                    game.updateLobby(this.message(full), event.interaction);
+                if (await game.removePlayer(event.interaction.user)) {
+                    await game.updateLobby(this.message(full), event.interaction);
                 } else {
-                    event.interaction.reply({ content: 'You have not even joined!', ephemeral: true });
+                    await event.interaction.reply({ content: 'You have not even joined!', ephemeral: true });
                 }
                 return;
             case '_start':
-                (async () => {
-                    const t = await this.starter(full, event.interaction as ButtonInteraction);
-                    if (t !== null) resolve(t);
-                })();
+                const t = await this.starter(full, event.interaction as ButtonInteraction);
+                if (t !== null) await resolve(t);
                 return;
             }
 
@@ -250,7 +248,7 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
                 break;
             }
             
-            game.updateLobby(this.message(full), event.interaction);
+            await game.updateLobby(this.message(full), event.interaction);
             break;
         }
     }

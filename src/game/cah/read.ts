@@ -70,12 +70,12 @@ export const readLogic: Logic<void, RoundContext> = {
         const { ctx, game, players, guildid } = full;
         switch (event.type) {
         case 'update':
-            game.updateMessage(players, p => message(full, p));
+            await game.updateMessage(players, p => message(full, p));
         break;
         case 'add':
         case 'remove':
             if (players.length > 2) {
-                game.updateMessage(players, p => message(full, p), event.interaction);
+                await game.updateMessage(players, p => message(full, p), event.interaction);
             }
         break;
         case 'interaction':
@@ -134,9 +134,9 @@ export const readLogic: Logic<void, RoundContext> = {
                 if (!ctx.quiplash) {
                     ctx.lastWinner = winner;
                 }
-                game.send(players, { embeds: [{ fields }]});
                 await game.closeMessage(players, undefined, i);
-                resolve();
+                await game.send(players, { embeds: [{ fields }]});
+                await resolve();
             }
         break;
         }

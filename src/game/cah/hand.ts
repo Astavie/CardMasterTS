@@ -120,10 +120,10 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
         const { ctx, players, game, guildid } = full;
         switch (event.type) {
         case 'update':
-            game.updateMessage(players, p => message(full, p));
+            await game.updateMessage(players, p => message(full, p));
         break;
         case 'add':
-            game.updateMessage(players, p => message(full, p), event.interaction);
+            await game.updateMessage(players, p => message(full, p), event.interaction);
         break;
         case 'remove':
             if (players.length > 2) {
@@ -138,10 +138,10 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
                         const prompt = await getBlackCard(guildid, ctx.prompt);
                         const blanks = countBlanks(prompt);
                         ctx.playing[i.user.id] = Array(blanks).fill(null)
-                        game.updateMessage(players, p => message(full, p), i);
+                        await game.updateMessage(players, p => message(full, p), i);
                     } else {
                         ctx.playing[i.user.id] = 'double';
-                        resolveWhenPlayersDone(full, i, resolve);
+                        await resolveWhenPlayersDone(full, i, resolve);
                     }
                 } else if (i.customId.startsWith('hand_')) {
                     const prompt = await getBlackCard(guildid, ctx.prompt);
@@ -167,28 +167,28 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
                         playing[uindex] = hand;
 
                         if (playing.indexOf(null) === -1) {
-                            resolveWhenPlayersDone(full, i, resolve);
+                            await resolveWhenPlayersDone(full, i, resolve);
                         } else {
-                            game.updateMessage([player], await message(full, player), i, false);
+                            await game.updateMessage([player], await message(full, player), i, false);
                         }
                     } else {
                         playing[pindex] = null;
                         
                         if (uindex === -1) {
-                            game.updateMessage(players, p => message(full, p), i);
+                            await game.updateMessage(players, p => message(full, p), i);
                         } else {
-                            game.updateMessage([player], await message(full, player), i, false);
+                            await game.updateMessage([player], await message(full, player), i, false);
                         }
                     }
                 }
             } else {
                 if (i.isButton()) {
                     if (i.customId === 'fill') {
-                        fillModal(await getBlackCard(guildid, ctx.prompt), i);
+                        await fillModal(await getBlackCard(guildid, ctx.prompt), i);
                     } else if (i.customId === 'random') {
                         if (ctx.playing[i.user.id] === 'random') {
                             ctx.playing[i.user.id] = null;
-                            game.updateMessage(players, p => message(full, p), i);
+                            await game.updateMessage(players, p => message(full, p), i);
                         } else {
                             const prompt = await getBlackCard(guildid, ctx.prompt);
                             const blanks = countBlanks(prompt);
@@ -200,12 +200,12 @@ export const handLogic: Logic<void, RoundContext> = singleResolve({
                             }
 
                             ctx.playing[i.user.id] = 'random';
-                            resolveWhenPlayersDone(full, i, resolve);
+                            await resolveWhenPlayersDone(full, i, resolve);
                         }
                     }
                 } else if (i.isModalSubmit() && i.customId === 'fill_modal') {
                     ctx.playing[i.user.id] = (i as ModalMessageModalSubmitInteraction).components.map(c => escapeDiscord((c.components[0] as TextInputModalData).value));
-                    resolveWhenPlayersDone(full, i, resolve);
+                    await resolveWhenPlayersDone(full, i, resolve);
                 }
             }
         break;
@@ -245,9 +245,9 @@ async function resolveWhenPlayersDone(full: FullContext<RoundContext>, i: Messag
 
         // next part!
         await game.closeMessage(players, p => message(full, p), i, false);
-        resolve();
+        await resolve();
     } else {
-        game.updateMessage(players, p => message(full, p), i);
+        await game.updateMessage(players, p => message(full, p), i);
     }
 }
 
