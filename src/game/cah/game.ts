@@ -1,5 +1,5 @@
 import { countBlanks } from '../../util/card';
-import { Logic, Transformer } from '../logic';
+import { Logic, Transformer, UserInteraction } from '../logic';
 import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
 export const prepareRound: Transformer<boolean, boolean, GameContext> = async (game, players, ctx, resume) => {
@@ -212,12 +212,15 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players,
 };
 
 export const gameResultLogic: Logic<void, GameContext> = async (game, players, ctx, events) => {
+    let i: UserInteraction | undefined;
     for await (const event of events) {
         if (event.type === 'interaction' && event.interaction.customId === '_close') {
-            await game.closeLobby(undefined, event.interaction);
+            i = event.interaction;
             break;
         }  
     }
+
+    await game.closeLobby(undefined, i);
 
     let winner = "";
     let maxPoints = 0;
