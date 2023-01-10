@@ -264,7 +264,8 @@ export function next<K, C>(a: Logic<unknown, C>, state: K): Logic<Next<K, C>, C>
 
 export function loop<T, C>(a: Logic<T, C>, f: (full: FullContext<C>, t: T) => Awaitable<boolean>): Logic<void, C> {
     return then(a, async (full, t, resolve, old, logic) => {
-        if (await f(full, t)) {
+        const ret = await f(full, t);
+        if (ret) {
             await logic.onExit?.(full);
             logic.onEvent?.(full, { type: 'update' }, old);
         } else {

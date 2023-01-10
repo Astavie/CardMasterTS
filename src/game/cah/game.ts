@@ -2,19 +2,15 @@ import { countBlanks } from '../../util/card';
 import { FullContext, Logic } from '../logic';
 import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
-export async function prepareRound({ ctx, game, players, guildid }: FullContext<GameContext>): Promise<boolean> {
+export async function prepareRound({ ctx, game, players, guildid }: FullContext<GameContext>, resume: boolean): Promise<boolean> {
+    if (!resume) {
+        return false;
+    }
+
     // Check if someone won
     if (Object.values(ctx.context.points).some(points => points >= ctx.context.maxPoints)) {
         return false;
     }   
-
-    // Chck if enough players
-    if (players.length < 2) {
-        game.send(players, { embeds: [{
-            description: '**The game has ended because there were not enough players left.**'
-        }]})
-        return false;
-    }
 
     // Set czar
     ctx.context.czar += 1;
@@ -23,7 +19,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
     // Get black card
     const card = ctx.context.blackDeck.pop();
     if (!card) {
-        game.send(players, { embeds: [{
+        await game.send(players, { embeds: [{
             description: '**The game has ended because the black deck ran out of cards.**'
         }]});
         return false;
@@ -69,7 +65,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
             while (hand.length < ctx.context.handCards) {
                 const card = ctx.context.whiteDeck.pop();
                 if (!card) {
-                    game.send(players, { embeds: [{
+                    await game.send(players, { embeds: [{
                         description: '**The game has ended because the white deck ran out of cards.**'
                     }]})
                     return false;
@@ -103,7 +99,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
         while (hand.length < blanks) {
             const card = ctx.context.whiteDeck.pop();
             if (!card) {
-                game.send(players, { embeds: [{
+                await game.send(players, { embeds: [{
                     description: '**The game has ended because the white deck ran out of cards.**'
                 }]})
                 return false;
@@ -124,7 +120,7 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
     return true;
 }
 
-export const joinLeaveLogic: Logic<void, GameContext> = {
+export const joinLeaveLogic: Logic<boolean, GameContext> = {
     async onEvent({ ctx, game, players, guildid }, event, resolve) {
         if (event.type !== 'interaction') return;
 
@@ -171,6 +167,16 @@ export const joinLeaveLogic: Logic<void, GameContext> = {
                 return;
             }
 
+            // check if this ends the game
+            if (players.length === 2) {
+                game.closeMessage(players, undefined, i);
+                await game.send(players, { embeds: [{
+                    description: '**The game has ended because there were not enough players left.**'
+                }]})
+                resolve(false);
+                return;
+            }
+            
             // put player cards back
             if (!ctx.context.quiplash) {
                 ctx.context.whiteDeck.push(...ctx.context.hand[i.user.id]);
@@ -184,19 +190,13 @@ export const joinLeaveLogic: Logic<void, GameContext> = {
             const sindex = ctx.context.shuffle.indexOf(i.user.id);
             if (sindex !== -1) ctx.context.shuffle.splice(sindex, 1);
 
-            // check if this ends the game
-            if (players.length < 2) {
-                resolve();
-                return;
-            }
-
             // update czar
             if (ctx.context.czar === index) {
                 ctx.context.czar -= 1;
                 game.send(players, { embeds: [{
                     description: '**The round has been skipped because the Card Czar left the game.**'
                 }]});
-                game.closeMessage([...players, i.user]).then(resolve);
+                game.closeMessage([...players, i.user], undefined, i).then(() => resolve(true));
                 return;
             } else {
                 if (ctx.context.czar > index) {
@@ -215,8 +215,8 @@ export const gameResultLogic: Logic<void, GameContext> = {
             resolve();
         }  
     },
-    onExit({ ctx, game, players }) {
-        game.closeLobby();
+    async onExit({ ctx, game, players }) {
+        await game.closeLobby();
 
         let winner = "";
         let maxPoints = 0;
@@ -229,18 +229,18 @@ export const gameResultLogic: Logic<void, GameContext> = {
 
         if (maxPoints > 0) {
             if (winner === randoId) {
-                game.send(players, { embeds: [{ fields: [{
+                await game.send(players, { embeds: [{ fields: [{
                     name: 'We have a winner!',
                     value: `\`Rando Cardrissian\` won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}. All players should go home in a state of everlasting shame.`,
                 }]}]})
             } else {
-                game.send(players, { embeds: [{ fields: [{
+                await game.send(players, { embeds: [{ fields: [{
                     name: 'We have a winner!',
                     value: `<@${winner}> won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}.`,
                 }]}]});
             }
         } else {
-            game.send(players, { embeds: [{
+            await game.send(players, { embeds: [{
                 description: '**No winner could be declared.**'
             }]});
         }

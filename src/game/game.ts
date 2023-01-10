@@ -121,10 +121,10 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         this.onEvent({ type: 'start', interaction: i });
     }
 
-    end() {
-        this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild });
+    async end() {
+        await this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild });
         games[this.guild].splice(games[this.guild].indexOf(this), 1);
-
+        
         if (this.lobby && this.lobby.isThread()) {
             this.lobby.setArchived(true, 'Game ended.');
         }

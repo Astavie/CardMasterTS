@@ -66,9 +66,6 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
 }
 
 export const readLogic: Logic<void, RoundContext> = {
-    async onExit({ game, players }: FullContext<RoundContext>) {
-        await game.closeMessage(players);
-    },
     async onEvent(full, event, resolve) {
         const { ctx, game, players, guildid } = full;
         switch (event.type) {
@@ -138,7 +135,8 @@ export const readLogic: Logic<void, RoundContext> = {
                     ctx.lastWinner = winner;
                 }
                 game.send(players, { embeds: [{ fields }]});
-                game.closeMessage(players, undefined, i).then(resolve);
+                await game.closeMessage(players, undefined, i);
+                resolve();
             }
         break;
         }

@@ -81,7 +81,7 @@ client.on('interactionCreate', interaction => {
 
     switch (interaction.commandName) {
         case "ping":
-            interaction.reply('Pong!');
+            interaction.reply('hurb');
             return;
         case "pack":
             switch (interaction.options.getSubcommand()) {
