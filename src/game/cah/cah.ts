@@ -2,11 +2,11 @@ import { randomInt } from "crypto";
 import { Snowflake, User } from "discord.js";
 import { countRealizations, realizeCard } from "../../util/card";
 import { GameType } from "../game";
-import { ContextOf, forward, LogicMap, loop, next, or, sequence, singleResolve, then } from "../logic";
+import { forward, ContextOf, sequence, or, loop, then } from "../logic";
 import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
-import { CAHSetupContext, getPack, setupLogic } from "./setup";
+import { defaultSetup, getPack, setupLogic } from "./setup";
 
 export type Card = [string, number, string[]]; // [pack, card, realizations]
 export type UnrealizedCard = Card | [string, number]; // [pack, card]
@@ -108,31 +108,20 @@ export type QuiplashRoundContext = BaseRoundContext & {
 
 export type RoundContext = CardRoundContext | QuiplashRoundContext;
 
-const roundMap: LogicMap<true, Record<'hand' | 'read', RoundContext>> = {
-    hand: next(handLogic, 'read'),
-    read: then(readLogic, (_full, _void, resolve) => resolve(true))
-}
-
-const roundLogic = sequence(roundMap); 
+const roundLogic = sequence(handLogic, readLogic); 
 export type GameContext = ContextOf<typeof roundLogic>;
 
 // -- game logic --
-let gameLogic =
-    or(
-        loop(
-            singleResolve(or(joinLeaveLogic, roundLogic)),
-            prepareRound,
-        ),
-        gameResultLogic
-    ); // first add/remove players, then further game logic
+const gameLogic = or(
+    loop(then(
+        or(joinLeaveLogic, roundLogic),
+        prepareRound)
+    ),
+    gameResultLogic
+);
 
 // -- global logic --
-const globalMap: LogicMap<void, { 'setup': Partial<CAHSetupContext>, 'game': GameContext }> = {
-    setup: forward(setupLogic, 'game'),
-    game:  gameLogic,
-}
-
-const globalLogic = sequence(globalMap);
+const globalLogic = forward(setupLogic, gameLogic)
 type GlobalContext = ContextOf<typeof globalLogic>;
 
 export const CAH: GameType<GlobalContext> = {
@@ -141,8 +130,7 @@ export const CAH: GameType<GlobalContext> = {
     logic: globalLogic,
     initialContext() {
         return {
-            state: 'setup',
-            context: {},
+            a: defaultSetup,
         };
     },
 }

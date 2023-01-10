@@ -1,23 +1,23 @@
 import { countBlanks } from '../../util/card';
-import { FullContext, Logic } from '../logic';
+import { Logic, Transformer } from '../logic';
 import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
-export async function prepareRound({ ctx, game, players, guildid }: FullContext<GameContext>, resume: boolean): Promise<boolean> {
+export const prepareRound: Transformer<boolean, boolean, GameContext> = async (game, players, ctx, resume) => {
     if (!resume) {
         return false;
     }
 
     // Check if someone won
-    if (Object.values(ctx.context.points).some(points => points >= ctx.context.maxPoints)) {
+    if (Object.values(ctx.ctx.points).some(points => points >= ctx.ctx.maxPoints)) {
         return false;
     }   
 
     // Set czar
-    ctx.context.czar += 1;
-    if (ctx.context.czar >= players.length) ctx.context.czar = 0;
+    ctx.ctx.czar += 1;
+    if (ctx.ctx.czar >= players.length) ctx.ctx.czar = 0;
 
     // Get black card
-    const card = ctx.context.blackDeck.pop();
+    const card = ctx.ctx.blackDeck.pop();
     if (!card) {
         await game.send(players, { embeds: [{
             description: '**The game has ended because the black deck ran out of cards.**'
@@ -25,45 +25,46 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
         return false;
     }
 
-    ctx.context.prompt = await realizeBlackCard(guildid, card, players);
-    const blanks = countBlanks(await getBlackCard(guildid, ctx.context.prompt));
+    const guildid = game.getGuild();
+    ctx.ctx.prompt = await realizeBlackCard(guildid, card, players);
+    const blanks = countBlanks(await getBlackCard(guildid, ctx.ctx.prompt));
 
     // Remove played cards
-    if (!ctx.context.quiplash) {
-        for (const player of Object.keys(ctx.context.playing)) {
-            const playing = ctx.context.playing[player];
-            const cards = ctx.context.hand[player];
+    if (!ctx.ctx.quiplash) {
+        for (const player of Object.keys(ctx.ctx.playing)) {
+            const playing = ctx.ctx.playing[player];
+            const cards = ctx.ctx.hand[player];
             const hand: Card[] = [];
-            for (let i = 0; i < ctx.context.handCards; i++) {
+            for (let i = 0; i < ctx.ctx.handCards; i++) {
                 if (playing === 'double' || !playing.includes(i)) {
                     hand.push(cards[i]);
                 }
             }
-            if (ctx.context.doubleornothing) {
+            if (ctx.ctx.doubleornothing) {
                 if (playing !== 'double') {
-                    ctx.context.doubleornothing[player] = {
-                        cards: playing.map(i => (ctx.context as CardRoundContext).hand[player][i!]),
+                    ctx.ctx.doubleornothing[player] = {
+                        cards: playing.map(i => (ctx.ctx as CardRoundContext).hand[player][i!]),
                         amount: 0,
                     };
-                } else if (player === ctx.context.lastWinner) {
-                    ctx.context.doubleornothing[player].amount += 1;
+                } else if (player === ctx.ctx.lastWinner) {
+                    ctx.ctx.doubleornothing[player].amount += 1;
                 } else {
-                    ctx.context.doubleornothing[player].amount = 0;
+                    ctx.ctx.doubleornothing[player].amount = 0;
                 }
             }
-            ctx.context.hand[player] = hand;
+            ctx.ctx.hand[player] = hand;
         }
     }
 
     // Give white cards
-    ctx.context.playing = {};
+    ctx.ctx.playing = {};
 
-    if (!ctx.context.quiplash) {
+    if (!ctx.ctx.quiplash) {
         for (const player of players) {
-            const hand = ctx.context.hand[player.id] ?? [];
+            const hand = ctx.ctx.hand[player.id] ?? [];
 
-            while (hand.length < ctx.context.handCards) {
-                const card = ctx.context.whiteDeck.pop();
+            while (hand.length < ctx.ctx.handCards) {
+                const card = ctx.ctx.whiteDeck.pop();
                 if (!card) {
                     await game.send(players, { embeds: [{
                         description: '**The game has ended because the white deck ran out of cards.**'
@@ -74,30 +75,30 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
                 }
             }
 
-            ctx.context.hand[player.id] = hand;
-            if (player !== players[ctx.context.czar]) ctx.context.playing[player.id] = Array(blanks).fill(null);
+            ctx.ctx.hand[player.id] = hand;
+            if (player !== players[ctx.ctx.czar]) ctx.ctx.playing[player.id] = Array(blanks).fill(null);
         }
     } else {
         for (const player of players) {
-            if (player !== players[ctx.context.czar]) ctx.context.playing[player.id] = null;
+            if (player !== players[ctx.ctx.czar]) ctx.ctx.playing[player.id] = null;
         }
     }
 
     // Set rando's cards
-    if (randoId in ctx.context.points && !(randoId in ctx.context.playing)) {
-        if (!ctx.context.quiplash && ctx.context.doubleornothing) {
-            const chance = ctx.context.lastWinner === randoId ? 0.33 : 0.05;
+    if (randoId in ctx.ctx.points && !(randoId in ctx.ctx.playing)) {
+        if (!ctx.ctx.quiplash && ctx.ctx.doubleornothing) {
+            const chance = ctx.ctx.lastWinner === randoId ? 0.33 : 0.05;
             if (Math.random() < chance) {
-                ctx.context.playing[randoId] = 'double';
+                ctx.ctx.playing[randoId] = 'double';
 
-                ctx.state = 'hand';
+                ctx.idx = 0;
                 return true;
             }
         }
 
         const hand: Card[] = [];
         while (hand.length < blanks) {
-            const card = ctx.context.whiteDeck.pop();
+            const card = ctx.ctx.whiteDeck.pop();
             if (!card) {
                 await game.send(players, { embeds: [{
                     description: '**The game has ended because the white deck ran out of cards.**'
@@ -108,21 +109,21 @@ export async function prepareRound({ ctx, game, players, guildid }: FullContext<
             }
         }
 
-        if (ctx.context.quiplash) {
-            ctx.context.playing[randoId] = await Promise.all(hand.map(c => getWhiteCard(guildid, c)));
+        if (ctx.ctx.quiplash) {
+            ctx.ctx.playing[randoId] = await Promise.all(hand.map(c => getWhiteCard(guildid, c)));
         } else {
-            ctx.context.hand[randoId] = hand;
-            ctx.context.playing[randoId] = [...Array(blanks).keys()];
+            ctx.ctx.hand[randoId] = hand;
+            ctx.ctx.playing[randoId] = [...Array(blanks).keys()];
         }
     }
 
-    ctx.state = 'hand';
+    ctx.idx = 0;
     return true;
 }
 
-export const joinLeaveLogic: Logic<boolean, GameContext> = {
-    async onEvent({ ctx, game, players, guildid }, event, resolve) {
-        if (event.type !== 'interaction') return;
+export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players, ctx, events) => {
+    for await (const event of events) {
+        if (event.type !== 'interaction') continue;
 
         const i = event.interaction;
         if (i.customId === '_join') {
@@ -132,31 +133,32 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = {
                     content: 'You have already joined!',
                     ephemeral: true
                 });
-                return;
+                continue;
             }
 
             // check if enough white cards left
-            if (!ctx.context.quiplash && ctx.state === 'hand' && ctx.context.whiteDeck.length < ctx.context.handCards) {
+            if (!ctx.ctx.quiplash && ctx.idx === 0 && ctx.ctx.whiteDeck.length < ctx.ctx.handCards) {
                 await i.reply({
                     content: 'There are not enough cards left for you to join!',
                     ephemeral: true
                 });
-                return;
+                continue;
             }
 
             // add player
-            ctx.context.points[i.user.id] = 0;
+            ctx.ctx.points[i.user.id] = 0;
 
-            if (!ctx.context.quiplash && ctx.state === 'hand') {
+            if (!ctx.ctx.quiplash && ctx.idx === 0) {
+                const guildid = game.getGuild();
                 const hand: Card[] = [];
-                while (hand.length < ctx.context.handCards) {
-                    const card = ctx.context.whiteDeck.pop()!;
+                while (hand.length < ctx.ctx.handCards) {
+                    const card = ctx.ctx.whiteDeck.pop()!;
                     hand.push(await realizeWhiteCard(guildid, card, players));
                 }
 
-                const blanks = countBlanks(await getBlackCard(guildid, ctx.context.prompt));
-                ctx.context.hand[i.user.id] = hand;
-                ctx.context.playing[i.user.id] = Array(blanks).fill(null);
+                const blanks = countBlanks(await getBlackCard(guildid, ctx.ctx.prompt));
+                ctx.ctx.hand[i.user.id] = hand;
+                ctx.ctx.playing[i.user.id] = Array(blanks).fill(null);
             }
 
             await game.addPlayer(i.user);
@@ -165,7 +167,7 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = {
             const index = players.indexOf(i.user);
             if (index === -1) {
                 i.reply({ content: 'You have not even joined!', ephemeral: true });
-                return;
+                continue;
             }
 
             // check if this ends the game
@@ -174,78 +176,74 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = {
                 await game.send(players, { embeds: [{
                     description: '**The game has ended because there were not enough players left.**'
                 }]})
-                await resolve(false);
-                return;
+                return false;
             }
             
             // put player cards back
-            if (!ctx.context.quiplash) {
-                ctx.context.whiteDeck.push(...ctx.context.hand[i.user.id]);
+            if (!ctx.ctx.quiplash) {
+                ctx.ctx.whiteDeck.push(...ctx.ctx.hand[i.user.id]);
             }
 
             // remove player
-            game.removePlayer(i.user);
-            delete ctx.context.points[i.user.id];
-            delete ctx.context.playing[i.user.id];
-            if (!ctx.context.quiplash) delete ctx.context.hand[i.user.id];
-            const sindex = ctx.context.shuffle.indexOf(i.user.id);
-            if (sindex !== -1) ctx.context.shuffle.splice(sindex, 1);
+            await game.removePlayer(i.user);
+            delete ctx.ctx.points[i.user.id];
+            delete ctx.ctx.playing[i.user.id];
+            if (!ctx.ctx.quiplash) delete ctx.ctx.hand[i.user.id];
+            const sindex = ctx.ctx.shuffle.indexOf(i.user.id);
+            if (sindex !== -1) ctx.ctx.shuffle.splice(sindex, 1);
 
             // update czar
-            if (ctx.context.czar === index) {
-                ctx.context.czar -= 1;
+            if (ctx.ctx.czar === index) {
+                ctx.ctx.czar -= 1;
                 await game.send(players, { embeds: [{
                     description: '**The round has been skipped because the Card Czar left the game.**'
                 }]});
                 await game.closeMessage([...players, i.user], undefined, i);
-                await resolve(true);
-                return;
+                return true;
             } else {
-                if (ctx.context.czar > index) {
-                    ctx.context.czar -= 1;
+                if (ctx.ctx.czar > index) {
+                    ctx.ctx.czar -= 1;
                 }
                 await game.closeMessage([i.user], undefined, i, true);
             }
         }
-    },
+    }
+    return false;
 };
 
-export const gameResultLogic: Logic<void, GameContext> = {
-    async onEvent({ game }, event, resolve) {
+export const gameResultLogic: Logic<void, GameContext> = async (game, players, ctx, events) => {
+    for await (const event of events) {
         if (event.type === 'interaction' && event.interaction.customId === '_close') {
             await game.closeLobby(undefined, event.interaction);
-            await resolve();
+            break;
         }  
-    },
-    async onExit({ ctx, game, players }) {
-        await game.closeLobby();
+    }
 
-        let winner = "";
-        let maxPoints = 0;
-        for (const [player, points] of Object.entries(ctx.context.points)) {
-            if (points > maxPoints) {
-                maxPoints = points;
-                winner = player;
-            }
+    let winner = "";
+    let maxPoints = 0;
+    for (const [player, points] of Object.entries(ctx.ctx.points)) {
+        if (points > maxPoints) {
+            maxPoints = points;
+            winner = player;
         }
+    }
 
-        if (maxPoints > 0) {
-            if (winner === randoId) {
-                await game.send(players, { embeds: [{ fields: [{
-                    name: 'We have a winner!',
-                    value: `\`Rando Cardrissian\` won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}. All players should go home in a state of everlasting shame.`,
-                }]}]})
-            } else {
-                await game.send(players, { embeds: [{ fields: [{
-                    name: 'We have a winner!',
-                    value: `<@${winner}> won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}.`,
-                }]}]});
-            }
+    if (maxPoints > 0) {
+        if (winner === randoId) {
+            await game.send(players, { embeds: [{ fields: [{
+                name: 'We have a winner!',
+                value: `\`Rando Cardrissian\` won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}. All players should go home in a state of everlasting shame.`,
+            }]}]})
         } else {
-            await game.send(players, { embeds: [{
-                description: '**No winner could be declared.**'
-            }]});
+            await game.send(players, { embeds: [{ fields: [{
+                name: 'We have a winner!',
+                value: `<@${winner}> won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}.`,
+            }]}]});
         }
-    },
+    } else {
+        await game.send(players, { embeds: [{
+            description: '**No winner could be declared.**'
+        }]});
+    }
 };
 

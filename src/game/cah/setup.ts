@@ -1,8 +1,8 @@
-import { ButtonInteraction, Snowflake } from 'discord.js';
+import { ButtonInteraction, Snowflake, User } from 'discord.js';
 import { db, loadPack } from '../../db';
 import { countBlanks, escapeDiscord, shuffle } from '../../util/card';
-import { FullContext } from '../logic';
-import { SetupContext, SetupLogic } from '../setup';
+import { Game } from '../logic';
+import { setup, SetupContext } from '../setup';
 import { Card, GameContext, getBlackCard, getCard, getWhiteCard, Pack, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
 
 function escapePack(p: Pack) {
@@ -14,15 +14,13 @@ function escapePack(p: Pack) {
 const config = [{
     type: 'choice',
     name: 'Packs',
-    values: [],
-    default: [],
+    values: (guildid: Snowflake) => Object.keys(db[guildid]?.packs ?? {}).map(label => ({ label })),
     min: 1,
     max: Number.MAX_SAFE_INTEGER,
 },{
     type: 'flags',
     name: 'Rules',
     values: ['Rando Cardrissian', 'Double or nothing', 'Quiplash mode'],
-    default: [true, true, false],
 },{
     type: 'number',
     name: 'Max points',
@@ -37,7 +35,7 @@ const config = [{
     default: 10,
 }] as const;
 
-export const setupLogic = new SetupLogic(config, { 'Packs': ({ guildid }) => Object.keys(db[guildid]?.packs ?? {}).map(name => ({ label: name }))}, startGame, ({ ctx, players }) => {
+export const setupLogic = setup(config, startGame, (_, players, ctx) => {
     const splayers: string[] = players.map(player => player.toString());
     if (ctx['Rules'][0]) splayers.unshift('`Rando Cardrissian`');
     return { fields: [{
@@ -46,7 +44,14 @@ export const setupLogic = new SetupLogic(config, { 'Packs': ({ guildid }) => Obj
     }]};
 });
 
-export type CAHSetupContext = SetupContext<typeof config>;
+type CAHSetupContext = SetupContext<typeof config>;
+
+export const defaultSetup: CAHSetupContext = {
+    Packs: [],
+    Rules: [true, true, false],
+    "Max points": config[2].default,
+    "Hand cards": config[3].default,
+}
 
 export const packs: {[key:string]:{[key:string]:Pack}} = {};
 
@@ -56,7 +61,7 @@ export async function getPack(guildid: Snowflake, pack: string): Promise<Pack> {
     return packs[guildid][pack];
 }
 
-async function startGame({ ctx, players, game, guildid }: FullContext<CAHSetupContext>, i: ButtonInteraction): Promise<GameContext | null> {
+async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonInteraction): Promise<GameContext | null> {
     if (players.length < 2) {
         i.reply({
             content: 'You need at least two players to start.',
@@ -68,6 +73,7 @@ async function startGame({ ctx, players, game, guildid }: FullContext<CAHSetupCo
     const whiteDeck: UnrealizedCard[] = [];
     const blackDeck: UnrealizedCard[] = [];
 
+    const guildid = game.getGuild();
     const names = Object.keys(db[guildid]?.packs ?? {});
     for (const pack of ctx['Packs']) {
         const p: Pack = await getPack(guildid, names[pack])
@@ -171,8 +177,7 @@ async function startGame({ ctx, players, game, guildid }: FullContext<CAHSetupCo
     }
 
     return {
-        state: 'hand',
-        context: round,
+        idx: 0,
+        ctx: round,
     };
 }
-

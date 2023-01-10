@@ -1,11 +1,8 @@
-import { APIEmbed, Client, CommandInteraction, Message, Snowflake, TextBasedChannel, User } from "discord.js";
-import { shuffle } from "../util/card";
+import { APIEmbed, APIMessageActionRowComponent, Client, CommandInteraction, Message, MessageActionRowComponent, Snowflake, TextBasedChannel, User } from "discord.js";
 import { disableButtons, MessageController, MessageOptions, MessageSave } from "../util/message";
 import { Serializable } from "../util/saving";
 import { CAH } from "./cah/cah";
-import { ContextOf, Event, forward, Game, Logic, MessageGenerator, sequence, UserInteraction } from "./logic";
-import { writingTelephone } from "./sentencer/sentencer";
-import { SetupLogic } from "./setup";
+import { cancelable, Event, Game, Logic, MessageGenerator, UserInteraction } from "./logic";
 
 // Games
 export const games: {[key:string]: GameImpl<unknown>[]} = {};
@@ -16,33 +13,6 @@ function addGame(game: GameType<unknown>): void {
 }
 
 addGame(CAH);
-
-const testedLogic = writingTelephone;
-
-const testerSetup = new SetupLogic<ContextOf<typeof testedLogic>, []>([], {}, async ({ players, game }, i) => {
-    await game.closeLobby(undefined, i, ['_close']);
-    return {
-        previous: Array(players.length).fill(null).map(() => []),
-        context: {
-            prompt: 'Antonyms',
-            description: 'Write the opposite of the following sentence:',
-        },
-        shuffle: shuffle(players.map(p => p.id)),
-        results: {},
-    };
-});
-
-const logicTester: GameType<unknown> = {
-    name: "tester",
-    color: 0x00FFFF,
-    logic: sequence({
-        setup: forward(testerSetup, 'game'),
-        game: testedLogic,
-    }),
-    initialContext: () => ({ state: 'setup', context: {} })
-}
-
-addGame(logicTester);
 
 // Impl
 export type GameType<C> = {
@@ -74,10 +44,27 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
     lobbyMessage: MessageController = new MessageController();
     stateMessage: MessageController = new MessageController();
 
+    resolves: ((e: Event) => void)[] = [];
+    eventLoop: AsyncIterable<Event> & { cancel(): void };
+
     constructor(type: GameType<C>, guild: Snowflake) {
         this.type = type;
         this.context = type.initialContext();
         this.guild = guild;
+
+        const game = this;
+        this.eventLoop = cancelable({
+            [Symbol.asyncIterator]() {
+                return {
+                    async next() {
+                        const value = await new Promise((resolve: (e: Event) => void) => {
+                            game.resolves.push(resolve);
+                        });
+                        return { value };
+                    }
+                };
+            }
+        });
     }
 
     save(): GameSave<C> {
@@ -89,6 +76,10 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             context: this.context,
             lobby: this.lobby.id,
         }
+    }
+
+    getGuild() {
+        return this.guild;
     }
 
     async load(client: Client, data: GameSave<C>): Promise<void> {
@@ -118,12 +109,15 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         games[this.guild] ??= [];
         games[this.guild].push(this);
         this.lobby = i.channel!;
-        await this.onEvent({ type: 'start', interaction: i });
+
+        // start logic
+        Promise.resolve(this.type.logic(this, this.players, this.context, this.eventLoop)).then(() => this.end());
+        this.onEvent({ type: 'start', interaction: i });
     }
 
     async end() {
         try {
-            await this.type.logic.onExit?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild })
+            this.eventLoop.cancel();
         } catch (error) {
             const now = new Date().toLocaleString();
             console.error(`--- ERROR ---`);
@@ -144,7 +138,11 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
     async onEvent(event: Event) {
         try {
-            await this.type.logic.onEvent?.({ ctx: this.context, game: this, players: this.players, guildid: this.guild }, event, () => this.end())
+            const res = this.resolves;
+            this.resolves = [];
+            for (const f of res) {
+                f(event);
+            }
         } catch (error) {
             const now = new Date().toLocaleString();
             console.error(`--- ERROR ---`);
@@ -257,10 +255,10 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
 
     async closeLobby(message?: MessageOptions, i?: UserInteraction, keepButtons?: string[]): Promise<void> {
         const lobbyMsg = Object.values(this.lobbyMessage.messages)[0].msg;
-        const msg = message ?? lobbyMsg;
+        const components = message?.components ?? lobbyMsg.components.map(c => c.toJSON());
         const options = {
-            embeds: msg.embeds,
-            components: msg.components && disableButtons(msg.components, keepButtons),
+            embeds: message?.embeds ?? lobbyMsg.embeds,
+            components: disableButtons(components, keepButtons),
         };
         if (i) {
             await i.update(options);
@@ -310,13 +308,19 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         
         const generator = message ?
             (typeof message === 'function' ? message : () => message) :
-            (_: unknown, channel: TextBasedChannel) => this.stateMessage.messages[channel.id]?.msg;
+            (_: unknown, channel: TextBasedChannel) => {
+                const msg = this.stateMessage.messages[channel.id]?.msg;
+                return {
+                    embeds: msg.embeds.map(e => e.toJSON()),
+                    components: msg.components.map(c => c.toJSON()),
+                };
+            };
         const generator2 = async (user: User | null, channel: TextBasedChannel) => {
             const m = await generator(user, channel);
             if (!m) return undefined;
 
             const options = {
-                embeds: m.embeds as APIEmbed[],
+                embeds: m.embeds,
                 components: m.components && disableButtons(m.components),
             };
             return options;

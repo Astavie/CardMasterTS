@@ -1,17 +1,16 @@
-import { ButtonInteraction, Client, APIEmbed, ActionRowData, MessageActionRowComponentData, InteractionButtonComponentData, Message, MessageComponentInteraction, ModalMessageModalSubmitInteraction, Snowflake, TextBasedChannel, ComponentType, APIEmbedField, ButtonStyle, CommandInteraction, APIMessageActionRowComponent } from "discord.js"
+import { APIActionRowComponent, APIButtonComponentWithCustomId, ButtonInteraction, Client, APIEmbed, Message, MessageComponentInteraction, ModalMessageModalSubmitInteraction, Snowflake, TextBasedChannel, ComponentType, APIEmbedField, ButtonStyle, CommandInteraction, APIMessageActionRowComponent } from "discord.js"
 import { Serializable } from "./saving";
 
 export type MessageOptions = {
     embeds?: APIEmbed[];
-    components?: ActionRowData<MessageActionRowComponentData>[];
-    forceList?: boolean;
+    components?: APIActionRowComponent<APIMessageActionRowComponent>[];
 }
 
-export function createButtonGrid(length: number, generator: (i: number) => Omit<InteractionButtonComponentData, 'type'>): ActionRowData<MessageActionRowComponentData>[] {
-    const rows: ActionRowData<MessageActionRowComponentData>[] = [];
+export function createButtonGrid(length: number, generator: (i: number) => Omit<APIButtonComponentWithCustomId, 'type'>): APIActionRowComponent<APIMessageActionRowComponent>[] {
+    const rows: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
     let i = 0;
     while (i < length) {
-        const row: MessageActionRowComponentData[] = [];
+        const row: APIMessageActionRowComponent[] = [];
         for (let j = 0; j < 5; j++) {
             row.push({
                 type: ComponentType.Button,
@@ -28,20 +27,14 @@ export function createButtonGrid(length: number, generator: (i: number) => Omit<
     return rows;
 }
 
-export function disableButtons(m: ActionRowData<MessageActionRowComponentData>[], exceptions?: string[]): ActionRowData<MessageActionRowComponentData>[] {
-    const newRows: ActionRowData<MessageActionRowComponentData>[] = [];
+export function disableButtons(m: APIActionRowComponent<APIMessageActionRowComponent>[], exceptions?: string[]): APIActionRowComponent<APIMessageActionRowComponent>[] {
+    const newRows: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
 
     for (const row of m) {
-        const newRow: MessageActionRowComponentData[] = [];
+        const newRow: APIMessageActionRowComponent[] = [];
 
-        for (const comp of row.components) {
-            let c: MessageActionRowComponentData;
-            if ('toJSON' in comp) {
-                c = comp.toJSON() as MessageActionRowComponentData
-            } else {
-                c = comp
-            }
-            if (!(c as any).disabled && (!exceptions || ((c as any).customId && !exceptions.includes((c as any).customId)))) {
+        for (const c of row.components) {
+            if (!c.disabled && (!exceptions || ('custom_id' in c && !exceptions.includes(c.custom_id)))) {
                 newRow.push({ ...c, disabled: true });
             } else {
                 newRow.push(c);
@@ -142,7 +135,7 @@ function prepareMessage(msg: MessageOptions): APIEmbed[] {
     return embeds;
 }
 
-function addPageButtons(components: ActionRowData<MessageActionRowComponentData>[], page: number, max: number): ActionRowData<MessageActionRowComponentData>[] {
+function addPageButtons(components: APIActionRowComponent<APIMessageActionRowComponent>[], page: number, max: number): APIActionRowComponent<APIMessageActionRowComponent>[] {
     components = components.length ? [ ...components ] : [{
         type: ComponentType.ActionRow,
         components: [],
@@ -154,13 +147,13 @@ function addPageButtons(components: ActionRowData<MessageActionRowComponentData>
         type: ComponentType.Button,
         style: ButtonStyle.Primary,
         label: "◀",
-        customId: `_prevpage`,
+        custom_id: `_prevpage`,
         disabled: page === 0,
     }, {
         type: ComponentType.Button,
         style: ButtonStyle.Primary,
         label: "▶",
-        customId: `_nextpage`,
+        custom_id: `_nextpage`,
         disabled: page + 1 >= max,
     });
 
@@ -190,7 +183,7 @@ export class MessageController implements Serializable<MessageSave> {
 
         const prepared = {
             embeds: [cache[page]],
-            components: options.components && (cache.length > 1 || options.forceList)
+            components: options.components && cache.length > 1
                 ? addPageButtons(options.components, page, cache.length)
                 : options.components,
         };
@@ -239,7 +232,7 @@ export class MessageController implements Serializable<MessageSave> {
 
         const prepared = {
             embeds: [cache[page]],
-            components: addPageButtons(previous.msg.components, page, cache.length),
+            components: addPageButtons(previous.msg.components.map(c => c.toJSON()), page, cache.length),
         };
 
         const msg = await i.update({ ...prepared, fetchReply: true }) as Message;

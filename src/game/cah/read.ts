@@ -1,10 +1,11 @@
-import { ActionRowData, APIEmbedField, ButtonStyle, ComponentType, MessageActionRowComponentData, User } from 'discord.js';
+import { APIActionRowComponent, APIEmbedField, APIMessageActionRowComponent, ButtonStyle, ComponentType, User } from 'discord.js';
 import { bolden, countBlanks, fillBlanks } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
-import { FullContext, Logic } from '../logic';
+import { Game, Logic } from '../logic';
 import { getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
 
-async function message({ ctx, players, guildid }: FullContext<RoundContext>, player: User | null): Promise<MessageOptions> {
+async function message(game: Game, players: User[], ctx: RoundContext, player: User | null): Promise<MessageOptions> {
+    const guildid = game.getGuild();
     const prompt = await getBlackCard(guildid, ctx.prompt);
     const blanks = countBlanks(prompt);
 
@@ -35,12 +36,12 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
 
     const message = `Card Czar: ${players[ctx.czar]}\n\n> ${await getBlackCard(guildid, ctx.prompt)}\n\n${answers}`;
     
-    const components: ActionRowData<MessageActionRowComponentData>[] = [];
+    const components: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
     if (players[ctx.czar] === player) {
         components.push(...createButtonGrid(ctx.shuffle.length, i => ({
             style: ButtonStyle.Primary,
             label: (i + 1).toString(),
-            customId: `answer_${i}`,
+            custom_id: `answer_${i}`,
         })));
     }
     if (player) {
@@ -48,7 +49,7 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
             type: ComponentType.ActionRow,
             components: [{
                 type: ComponentType.Button,
-                customId: '_leave',
+                custom_id: '_leave',
                 style: ButtonStyle.Danger,
                 label: 'Leave',
             }]
@@ -61,24 +62,23 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
             value: message,
         }]}],
         components,
-        forceList: true,
     };
 }
 
-export const readLogic: Logic<void, RoundContext> = {
-    async onEvent(full, event, resolve) {
-        const { ctx, game, players, guildid } = full;
+export const readLogic: Logic<boolean, RoundContext> = async (game, players, ctx, events) => {
+
+    game.updateMessage(players, p => message(game, players, ctx, p));
+    
+    for await (const event of events) {
         switch (event.type) {
-        case 'update':
-            await game.updateMessage(players, p => message(full, p));
-        break;
         case 'add':
         case 'remove':
             if (players.length > 2) {
-                await game.updateMessage(players, p => message(full, p), event.interaction);
+                await game.updateMessage(players, p => message(game, players, ctx, p), event.interaction);
             }
         break;
         case 'interaction':
+            const guildid = game.getGuild();
             const i = event.interaction;
             if (i.customId.startsWith('answer_')) {
                 const prompt = await getBlackCard(guildid, ctx.prompt);
@@ -136,9 +136,10 @@ export const readLogic: Logic<void, RoundContext> = {
                 }
                 await game.closeMessage(players, undefined, i);
                 await game.send(players, { embeds: [{ fields }]});
-                await resolve();
+                return true;
             }
         break;
         }
     }
+    return false;
 }
