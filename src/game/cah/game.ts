@@ -1,8 +1,8 @@
 import { countBlanks } from '../../util/card';
-import { Logic, Transformer, UserInteraction } from '../logic';
+import { Logic, Transformer } from '../logic';
 import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
-export const prepareRound: Transformer<boolean, boolean, GameContext> = async (game, players, ctx, resume) => {
+export const prepareRound: Transformer<boolean, boolean, GameContext> = (game, players, ctx, resume) => {
     if (!resume) {
         return false;
     }
@@ -19,15 +19,14 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = async (g
     // Get black card
     const card = ctx.ctx.blackDeck.pop();
     if (!card) {
-        await game.send(players, { embeds: [{
+        game.send(players, { embeds: [{
             description: '**The game has ended because the black deck ran out of cards.**'
         }]});
         return false;
     }
 
-    const guildid = game.getGuild();
-    ctx.ctx.prompt = await realizeBlackCard(guildid, card, players);
-    const blanks = countBlanks(await getBlackCard(guildid, ctx.ctx.prompt));
+    ctx.ctx.prompt = realizeBlackCard(game, card, players);
+    const blanks = countBlanks(getBlackCard(game, ctx.ctx.prompt));
 
     // Remove played cards
     if (!ctx.ctx.quiplash) {
@@ -66,12 +65,12 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = async (g
             while (hand.length < ctx.ctx.handCards) {
                 const card = ctx.ctx.whiteDeck.pop();
                 if (!card) {
-                    await game.send(players, { embeds: [{
+                    game.send(players, { embeds: [{
                         description: '**The game has ended because the white deck ran out of cards.**'
                     }]})
                     return false;
                 } else {
-                    hand.push(await realizeWhiteCard(guildid, card, players));
+                    hand.push(realizeWhiteCard(game, card, players));
                 }
             }
 
@@ -100,17 +99,17 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = async (g
         while (hand.length < blanks) {
             const card = ctx.ctx.whiteDeck.pop();
             if (!card) {
-                await game.send(players, { embeds: [{
+                game.send(players, { embeds: [{
                     description: '**The game has ended because the white deck ran out of cards.**'
                 }]})
                 return false;
             } else {
-                hand.push(await realizeWhiteCard(guildid, card, players));
+                hand.push(realizeWhiteCard(game, card, players));
             }
         }
 
         if (ctx.ctx.quiplash) {
-            ctx.ctx.playing[randoId] = await Promise.all(hand.map(c => getWhiteCard(guildid, c)));
+            ctx.ctx.playing[randoId] = hand.map(c => getWhiteCard(game, c));
         } else {
             ctx.ctx.hand[randoId] = hand;
             ctx.ctx.playing[randoId] = [...Array(blanks).keys()];
@@ -121,15 +120,16 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = async (g
     return true;
 }
 
-export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players, ctx, events) => {
-    for await (const event of events) {
+export const joinLeaveLogic: Logic<boolean, GameContext> = function* (game, players, ctx) {
+    while (true) {
+        const event = yield;
         if (event.type !== 'interaction') continue;
 
         const i = event.interaction;
         if (i.customId === '_join') {
             // check if already joined
             if (players.indexOf(i.user) !== -1) {
-                await i.reply({
+                i.reply({
                     content: 'You have already joined!',
                     ephemeral: true
                 });
@@ -138,7 +138,7 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players,
 
             // check if enough white cards left
             if (!ctx.ctx.quiplash && ctx.idx === 0 && ctx.ctx.whiteDeck.length < ctx.ctx.handCards) {
-                await i.reply({
+                i.reply({
                     content: 'There are not enough cards left for you to join!',
                     ephemeral: true
                 });
@@ -149,19 +149,18 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players,
             ctx.ctx.points[i.user.id] = 0;
 
             if (!ctx.ctx.quiplash && ctx.idx === 0) {
-                const guildid = game.getGuild();
                 const hand: Card[] = [];
                 while (hand.length < ctx.ctx.handCards) {
                     const card = ctx.ctx.whiteDeck.pop()!;
-                    hand.push(await realizeWhiteCard(guildid, card, players));
+                    hand.push(realizeWhiteCard(game, card, players));
                 }
 
-                const blanks = countBlanks(await getBlackCard(guildid, ctx.ctx.prompt));
+                const blanks = countBlanks(getBlackCard(game, ctx.ctx.prompt));
                 ctx.ctx.hand[i.user.id] = hand;
                 ctx.ctx.playing[i.user.id] = Array(blanks).fill(null);
             }
 
-            await game.addPlayer(i.user);
+            game.addPlayer(i.user);
         } else if (i.customId === '_leave') {
             // check if not in game
             const index = players.indexOf(i.user);
@@ -172,8 +171,8 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players,
 
             // check if this ends the game
             if (players.length === 2) {
-                await game.closeMessage(players, undefined, i);
-                await game.send(players, { embeds: [{
+                game.closeMessage(players, undefined, i);
+                game.send(players, { embeds: [{
                     description: '**The game has ended because there were not enough players left.**'
                 }]})
                 return false;
@@ -185,7 +184,7 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players,
             }
 
             // remove player
-            await game.removePlayer(i.user);
+            game.removePlayer(i.user);
             delete ctx.ctx.points[i.user.id];
             delete ctx.ctx.playing[i.user.id];
             if (!ctx.ctx.quiplash) delete ctx.ctx.hand[i.user.id];
@@ -195,32 +194,23 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = async (game, players,
             // update czar
             if (ctx.ctx.czar === index) {
                 ctx.ctx.czar -= 1;
-                await game.send(players, { embeds: [{
+                game.send(players, { embeds: [{
                     description: '**The round has been skipped because the Card Czar left the game.**'
                 }]});
-                await game.closeMessage([...players, i.user], undefined, i);
+                game.closeMessage([...players, i.user], undefined, i);
                 return true;
             } else {
                 if (ctx.ctx.czar > index) {
                     ctx.ctx.czar -= 1;
                 }
-                await game.closeMessage([i.user], undefined, i, true);
+                game.closeMessage([i.user], undefined, i, true);
             }
         }
     }
-    return false;
 };
 
-export const gameResultLogic: Logic<void, GameContext> = async (game, players, ctx, events) => {
-    let i: UserInteraction | undefined;
-    for await (const event of events) {
-        if (event.type === 'interaction' && event.interaction.customId === '_close') {
-            i = event.interaction;
-            break;
-        }  
-    }
-
-    await game.closeLobby(undefined, i);
+export const gameResult: Transformer<void, void, GameContext> = (game, players, ctx) => {
+    game.closeLobby();
 
     let winner = "";
     let maxPoints = 0;
@@ -233,18 +223,18 @@ export const gameResultLogic: Logic<void, GameContext> = async (game, players, c
 
     if (maxPoints > 0) {
         if (winner === randoId) {
-            await game.send(players, { embeds: [{ fields: [{
+            game.send(players, { embeds: [{ fields: [{
                 name: 'We have a winner!',
                 value: `\`Rando Cardrissian\` won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}. All players should go home in a state of everlasting shame.`,
             }]}]})
         } else {
-            await game.send(players, { embeds: [{ fields: [{
+            game.send(players, { embeds: [{ fields: [{
                 name: 'We have a winner!',
                 value: `<@${winner}> won with ${maxPoints} ${maxPoints === 1 ? 'point' : 'points'}.`,
             }]}]});
         }
     } else {
-        await game.send(players, { embeds: [{
+        game.send(players, { embeds: [{
             description: '**No winner could be declared.**'
         }]});
     }

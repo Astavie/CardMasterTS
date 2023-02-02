@@ -25,6 +25,7 @@ const commands = [
         .addSubcommand(new SlashCommandSubcommandBuilder()
             .setName('refresh')
             .addStringOption(option => option.setName('pack').setDescription('The pack to refresh.').setRequired(true))
+            .addStringOption(option => option.setName('url').setRequired(false).setDescription('The URL containing pack data.'))
             .setDescription('Redownload a pack from this guild.'))
         .setDescription('Manage the packs of this guild.'),
     new SlashCommandBuilder()

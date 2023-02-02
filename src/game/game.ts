@@ -1,8 +1,10 @@
-import { APIEmbed, APIMessageActionRowComponent, Client, CommandInteraction, Message, MessageActionRowComponent, Snowflake, TextBasedChannel, User } from "discord.js";
+import { Client, CommandInteraction, Message, Snowflake, TextBasedChannel, User } from "discord.js";
+import { loadPack } from "../db";
+import { escapeDiscord } from "../util/card";
 import { disableButtons, MessageController, MessageOptions, MessageSave } from "../util/message";
 import { Serializable } from "../util/saving";
 import { CAH } from "./cah/cah";
-import { cancelable, Event, Game, Logic, MessageGenerator, UserInteraction } from "./logic";
+import { Event, Game, GameType, MessageGenerator, Pack, UserInteraction } from "./logic";
 
 // Games
 export const games: {[key:string]: GameImpl<unknown>[]} = {};
@@ -15,13 +17,6 @@ function addGame(game: GameType<unknown>): void {
 addGame(CAH);
 
 // Impl
-export type GameType<C> = {
-    name: string,
-    color: number,
-    logic: Logic<unknown, C>,
-    initialContext(): C,
-}
-
 export type GameSave<C> = {
     game: string,
     players: Snowflake[],
@@ -29,6 +24,20 @@ export type GameSave<C> = {
     stateMessage: MessageSave,
     context: C,
     lobby?: Snowflake,
+}
+
+const packs: {[key:string]:{[key:string]:Pack}} = {};
+
+function escapePack(p: Pack) {
+    p.cards.white = p.cards.white.map(escapeDiscord);
+    p.cards.black = p.cards.black.map(c => typeof(c) === 'string' ? escapeDiscord(c) : { ...c, text: escapeDiscord(c.text) });
+    return p;
+}
+
+async function getPackAsync(guildid: Snowflake, pack: string): Promise<Pack> {
+    packs[guildid] ??= {};
+    packs[guildid][pack] ??= escapePack(await loadPack(guildid, pack));
+    return packs[guildid][pack];
 }
 
 export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
@@ -39,32 +48,39 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
     type: GameType<C>;
     context: C;
 
+    ended: boolean = false;
     guild: Snowflake;
 
     lobbyMessage: MessageController = new MessageController();
     stateMessage: MessageController = new MessageController();
 
-    resolves: ((e: Event) => void)[] = [];
-    eventLoop: AsyncIterable<Event> & { cancel(): void };
+    generator: Generator<void, unknown, Event>;
+
+    queue: Promise<unknown> = Promise.resolve();
+
+    processing: boolean = false;
+    eventQueue: Event[] = [];
 
     constructor(type: GameType<C>, guild: Snowflake) {
         this.type = type;
         this.context = type.initialContext();
         this.guild = guild;
+    }
 
-        const game = this;
-        this.eventLoop = cancelable({
-            [Symbol.asyncIterator]() {
-                return {
-                    async next() {
-                        const value = await new Promise((resolve: (e: Event) => void) => {
-                            game.resolves.push(resolve);
-                        });
-                        return { value };
-                    }
-                };
-            }
+    getPack(id: string) {
+        return packs[this.guild]?.[id] ?? null;
+    }
+
+    loadPack(id: string) {
+        getPackAsync(this.guild, id).then(pack => {
+            packs[this.guild][pack.rawname] = pack;
+            this.onEvent({ type: 'pack_loaded', id });
         });
+    }
+
+    enqueue(elem: Promise<unknown> | (() => Promise<unknown>)) {
+        const func = typeof(elem) === 'function' ? elem : async () => await elem;
+        this.queue = this.queue.then(func);
     }
 
     save(): GameSave<C> {
@@ -103,176 +119,187 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
         );
 
         await Promise.all(promises);
+
+        this.generator = this.type.logic(this, this.players, this.context);
+        this.generator.next();
     }
 
-    async start(i: CommandInteraction) {
+    start(i: CommandInteraction) {
         games[this.guild] ??= [];
         games[this.guild].push(this);
         this.lobby = i.channel!;
 
         // start logic
-        Promise.resolve(this.type.logic(this, this.players, this.context, this.eventLoop)).then(() => this.end());
+        this.generator = this.type.logic(this, this.players, this.context);
+        this.generator.next();
         this.onEvent({ type: 'start', interaction: i });
     }
 
-    async end() {
-        try {
-            this.eventLoop.cancel();
-        } catch (error) {
-            const now = new Date().toLocaleString();
-            console.error(`--- ERROR ---`);
-            console.error(error);
-            console.error(`encountered while ending a game of "${this.type.name}" inside guild ${this.guild} at ${now}`);
-            console.error(`game.context: ${JSON.stringify(this.context)}`)
-            console.error(`-------------`);
-
-            await this.report(`An error occurred while closing the game\nPlease report this to Astavie#2920 with the timestamp ${now}`)
-        }
-        
+    end() {
+        this.ended = true;
         games[this.guild].splice(games[this.guild].indexOf(this), 1);
-        
-        if (this.lobby && this.lobby.isThread()) {
-            this.lobby.setArchived(true, 'Game ended.');
-        }
+
+        this.enqueue(async () => {
+            if (this.lobby && this.lobby.isThread()) {
+                await this.lobby.setArchived(true, 'Game ended.');
+            }
+        });
     }
 
-    async onEvent(event: Event) {
+    onEvent(event: Event) {
+        if (this.ended) {
+            return;
+        }
+        this.eventQueue.push(event);
+        if (this.processing) {
+            return;
+        }
+
         try {
-            const res = this.resolves;
-            this.resolves = [];
-            for (const f of res) {
-                f(event);
+            this.processing = true;
+            while (this.eventQueue.length) {
+                const queue = this.eventQueue;
+                this.eventQueue = [];
+
+                for (const event of queue) {
+                    const next = this.generator.next(event);
+                    if (next.done) {
+                        this.end();
+                        return;
+                    }
+                }
             }
+            this.processing = false;
         } catch (error) {
             const now = new Date().toLocaleString();
             console.error(`--- ERROR ---`);
             console.error(error)
             console.error(`encountered during a game of "${this.type.name}" inside guild ${this.guild} at ${now}`);
-            console.error(`event: ${JSON.stringify(event)}`)
-            console.error(`game.context: ${JSON.stringify(this.context)}`)
+            console.error(`event: ${event}`)
+            console.error(`game.context: ${this.context}`)
             console.error(`-------------`);
             
-            await this.report(`An error occurred while running the game, causing the game to close prematurely\nPlease report this to Astavie#2920 with the timestamp ${now}`)
-            await this.end()
+            this.report(`An error occurred while running the game, causing the game to close prematurely\nPlease report this to Astavie#2920 with the timestamp ${now}`)
+            this.end()
         }
     }
     
-    async report(message: string) {
+    report(message: string) {
         let promises: Promise<unknown>[] = [];
 
         const p = this.lobby.send(message);
         if (p) promises.push(p)
 
         for (const player of this.players) {
-            promises.push((async () => {
-                (await player.createDM()).send(message);
-            })());
+            promises.push(player.createDM().then(dm => dm.send(message)));
         }
 
         // Ignore any errors at this point
         promises = promises.map(p => p.catch(() => {}));
         
-        await Promise.all(promises);
+        this.enqueue(Promise.all(promises));
     }
     
-    async addPlayer(player: User, i?: UserInteraction): Promise<boolean> {
+    addPlayer(player: User, i?: UserInteraction): boolean {
         if (this.players.indexOf(player) !== -1) return false;
-        
+
         this.players.push(player);
-        await this.onEvent({ type: 'add', player, interaction: i });
+        this.onEvent({ type: 'add', player, interaction: i });
         return true;
     }
 
-    async removePlayer(player: User, i?: UserInteraction): Promise<boolean> {
+    removePlayer(player: User, i?: UserInteraction): boolean {
         const idx = this.players.indexOf(player);
         if (idx === -1) return false;
 
         this.players.splice(idx, 1);
-        await this.onEvent({ type: 'remove', player, interaction: i });
+        this.onEvent({ type: 'remove', player, interaction: i });
         return true;
     }
 
-    async allowSpectators(): Promise<void> {
+    allowSpectators() {
         const msg = Object.values(this.lobbyMessage.messages)[0].msg;
-        this.lobby = msg.channel.isThread()
-            ? msg.channel
-            : await msg.startThread({ name: this.type.name, autoArchiveDuration: 60 });
+        this.enqueue(msg.startThread({ name: this.type.name, autoArchiveDuration: 60 }).then(t => {
+            this.lobby = t;
+        }));
     }
 
     isMyInteraction(i: UserInteraction) {
         return this.stateMessage.isMyInteraction(i) || this.lobbyMessage.isMyInteraction(i);
     }
 
-    async onMessage(m: Message) {
-        await this.onEvent({ type: 'dm', message: m });
+    onMessage(m: Message) {
+        this.onEvent({ type: 'dm', message: m });
     }
 
-    async onInteraction(i: UserInteraction) {
+    onInteraction(i: UserInteraction) {
         if (i.isButton() && (i.customId === '_prevpage' || i.customId === '_nextpage')) {
-            await this.stateMessage.flipPage(i);
+            this.enqueue(this.stateMessage.flipPage(i));
         } else {
-            await this.onEvent({ type: 'interaction', interaction: i });
+            this.onEvent({ type: 'interaction', interaction: i });
         }
     }
 
-    async send(players: User[], message: MessageGenerator | MessageOptions, sendSpectators = true): Promise<void> {
-        const promises: Promise<unknown>[] = [];
-
+    send(players: User[], message: MessageGenerator | MessageOptions, sendSpectators = true) {
         const generator = typeof message === 'function' ? message : () => message;
-        const generator2: MessageGenerator = async user => {
-            const m = await generator(user);
+        const generator2: MessageGenerator = user => {
+            const m = generator(user);
             if (m.embeds)
                 for (const embed of m.embeds)
                     embed.color ??= this.type.color;
             return m;
         }
 
-        if (sendSpectators) {
-            const p = this.lobby.send(await generator2(null));
-            if (p) promises.push(p)
-        }
+        this.enqueue(async () => {
+            const promises: Promise<unknown>[] = [];
+            if (sendSpectators) {
+                const p = this.lobby.send(generator2(null));
+                if (p) promises.push(p)
+            }
 
-        for (const player of players) {
-            promises.push((async () => {
-                (await player.createDM()).send(await generator2(player));
-            })());
-        }
-
-        await Promise.all(promises);
+            for (const player of players) {
+                promises.push(player.createDM().then(dm => dm.send(generator2(player))));
+            }
+            await Promise.all(promises);
+        });
     }
 
-    async updateLobby(message: MessageOptions, i?: UserInteraction | CommandInteraction): Promise<void> {
+    updateLobby(message: MessageOptions, i?: UserInteraction | CommandInteraction) {
         if (message.embeds) for (const embed of message.embeds) {
             embed.title ??= this.type.name;
             embed.color ??= this.type.color;
         }
-        await this.lobbyMessage.send(
-            i?.channel ?? Object.values(this.lobbyMessage.messages)[0].msg.channel,
-            message,
-            i
-        );
+
+        this.enqueue(async () => {
+            await this.lobbyMessage.send(
+                i?.channel ?? Object.values(this.lobbyMessage.messages)[0].msg.channel,
+                message,
+                i
+            );
+        });
     }
 
-    async closeLobby(message?: MessageOptions, i?: UserInteraction, keepButtons?: string[]): Promise<void> {
-        const lobbyMsg = Object.values(this.lobbyMessage.messages)[0].msg;
-        const components = message?.components ?? lobbyMsg.components.map(c => c.toJSON());
-        const options = {
-            embeds: message?.embeds ?? lobbyMsg.embeds,
-            components: disableButtons(components, keepButtons),
-        };
-        if (i) {
-            await i.update(options);
-        } else {
-            await lobbyMsg.edit(options);
-        }
+    closeLobby(message?: MessageOptions, i?: UserInteraction, keepButtons?: string[]) {
+        this.enqueue(async () => {
+            const lobbyMsg = Object.values(this.lobbyMessage.messages)[0].msg;
+            const components = message?.components ?? lobbyMsg.components.map(c => c.toJSON());
+            const options = {
+                embeds: message?.embeds ?? lobbyMsg.embeds,
+                components: disableButtons(components, keepButtons),
+            };
+
+            if (i) {
+                await i.update(options);
+            } else {
+                await lobbyMsg.edit(options);
+            }
+        });
     }
 
-    async updateMessage(players: User[], message: MessageOptions | MessageGenerator, i?: UserInteraction, sendSpectators = true): Promise<void> {
-        const promises: Promise<void>[] = [];
-        
+    updateMessage(players: User[], message: MessageOptions | MessageGenerator, i?: UserInteraction, sendSpectators = true) {
         const generator = typeof message === 'function' ? message : () => message;
-        const generator2: MessageGenerator = async user => {
-            const m = await generator(user);
+        const generator2: MessageGenerator = user => {
+            const m = generator(user);
             if (m.embeds) {
                 for (const embed of m.embeds) {
                     embed.title ??= this.type.name;
@@ -282,30 +309,29 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             return m;
         }
 
-        if (sendSpectators) {
-            const msg = await generator2(null);
-            promises.push(this.stateMessage.send(
-                this.lobby,
-                msg, 
-                i?.channel === this.lobby ? i : undefined
-            ));
-        }
-
-        for (const player of players) {
-            const msg = await generator2(player);
-            promises.push(player.createDM().then(dm => this.stateMessage.send(
-                dm,
-                msg,
-                i?.channel === dm ? i : undefined
-            )));
-        }
-
-        await Promise.all(promises);
+        this.enqueue(async () => {
+            const promises: Promise<void>[] = [];
+            if (sendSpectators) {
+                const msg = generator2(null);
+                promises.push(this.stateMessage.send(
+                    this.lobby,
+                    msg, 
+                    i?.channel === this.lobby ? i : undefined
+                ));
+            }
+            for (const player of players) {
+                const msg = generator2(player);
+                promises.push(player.createDM().then(dm => this.stateMessage.send(
+                    dm,
+                    msg,
+                    i?.channel === dm ? i : undefined
+                )));
+            }
+            await Promise.all(promises);
+        });
     }
 
-    async closeMessage(players: User[], message?: MessageGenerator | MessageOptions, i?: UserInteraction, closeSpectators = true): Promise<void> {
-        const promises: Promise<unknown>[] = [];
-        
+    closeMessage(players: User[], message?: MessageGenerator | MessageOptions, i?: UserInteraction, closeSpectators = true) {
         const generator = message ?
             (typeof message === 'function' ? message : () => message) :
             (_: unknown, channel: TextBasedChannel) => {
@@ -315,8 +341,8 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
                     components: msg.components.map(c => c.toJSON()),
                 };
             };
-        const generator2 = async (user: User | null, channel: TextBasedChannel) => {
-            const m = await generator(user, channel);
+        const generator2 = (user: User | null, channel: TextBasedChannel) => {
+            const m = generator(user, channel);
             if (!m) return undefined;
 
             const options = {
@@ -326,34 +352,35 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             return options;
         }
 
-        if (closeSpectators) {
-            const msg = await generator2(null, this.lobby);
-            if (msg) {
-                promises.push(this.stateMessage.send(
-                    this.lobby,
-                    msg, 
-                    i?.channel === this.lobby ? i : undefined
-                ).then(() => {
-                    delete this.stateMessage.messages[this.lobby.id];
+        this.enqueue(async () => {
+            const promises: Promise<unknown>[] = [];
+            if (closeSpectators) {
+                const msg = generator2(null, this.lobby);
+                if (msg) {
+                    promises.push(this.stateMessage.send(
+                        this.lobby,
+                        msg, 
+                        i?.channel === this.lobby ? i : undefined
+                    ).then(() => {
+                        delete this.stateMessage.messages[this.lobby.id];
+                    }));
+                }
+            }
+            for (const player of players) {
+                promises.push(player.createDM().then(async dm => {
+                    const msg = generator2(player, dm);
+                    if (msg) {
+                        await this.stateMessage.send(
+                            dm,
+                            msg,
+                            i?.channel === dm ? i : undefined
+                        );
+                        delete this.stateMessage.messages[dm.id];
+                    }
                 }));
             }
-        }
-
-        for (const player of players) {
-            promises.push(player.createDM().then(async dm => {
-                const msg = await generator2(player, dm);
-                if (msg) {
-                    await this.stateMessage.send(
-                        dm,
-                        msg,
-                        i?.channel === dm ? i : undefined
-                    );
-                    delete this.stateMessage.messages[dm.id];
-                }
-            }));
-        }
-
-        await Promise.all(promises);
+            await Promise.all(promises);
+        });
     }
 
 }

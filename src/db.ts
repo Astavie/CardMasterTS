@@ -1,5 +1,5 @@
 import { Snowflake } from "discord.js"
-import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import path from "path"
 import fetch from "node-fetch"
 import { GameSave } from "./game/game"

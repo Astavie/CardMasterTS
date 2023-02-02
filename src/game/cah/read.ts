@@ -4,24 +4,22 @@ import { createButtonGrid, MessageOptions } from '../../util/message';
 import { Game, Logic } from '../logic';
 import { getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
 
-async function message(game: Game, players: User[], ctx: RoundContext, player: User | null): Promise<MessageOptions> {
-    const guildid = game.getGuild();
-    const prompt = await getBlackCard(guildid, ctx.prompt);
+function message(game: Game, players: User[], ctx: RoundContext, player: User | null): MessageOptions {
+    const prompt = getBlackCard(game, ctx.prompt);
     const blanks = countBlanks(prompt);
 
-    const answers = (await Promise.all(ctx.shuffle.map(async (p, i) => {
+    const answers = ctx.shuffle.map((p, i) => {
         let answers: string[];
         if (ctx.quiplash) {
             answers = ctx.playing[p] as string[];
         } else if (ctx.playing[p] === 'double') {
-            answers = await Promise.all(ctx.doubleornothing![p].cards.map(c => getWhiteCard(guildid, c)));
+            answers = ctx.doubleornothing![p].cards.map(c => getWhiteCard(game, c));
             const missing = blanks - answers.length;
             for (let i = 0; i < missing; i++) {
                 answers.push(answers[i]);
             }
         } else {
-            answers = await Promise.all((ctx.playing[p] as (number | string)[])
-                .map(i => getWhiteCard(guildid, ctx.hand[p][i!])));
+            answers = (ctx.playing[p] as (number | string)[]).map(i => getWhiteCard(game, ctx.hand[p][i!]));
         }
 
         let answer = prompt;
@@ -32,9 +30,9 @@ async function message(game: Game, players: User[], ctx: RoundContext, player: U
         }
 
         return `\`${i + 1}.\` ${answer}`;
-    }))).join('\n');
+    }).join('\n');
 
-    const message = `Card Czar: ${players[ctx.czar]}\n\n> ${await getBlackCard(guildid, ctx.prompt)}\n\n${answers}`;
+    const message = `Card Czar: ${players[ctx.czar]}\n\n> ${getBlackCard(game, ctx.prompt)}\n\n${answers}`;
     
     const components: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
     if (players[ctx.czar] === player) {
@@ -65,23 +63,24 @@ async function message(game: Game, players: User[], ctx: RoundContext, player: U
     };
 }
 
-export const readLogic: Logic<boolean, RoundContext> = async (game, players, ctx, events) => {
+export const readLogic: Logic<true, RoundContext> = function* (game, players, ctx) {
 
     game.updateMessage(players, p => message(game, players, ctx, p));
-    
-    for await (const event of events) {
+
+    while (true) {
+        const event = yield;
+
         switch (event.type) {
         case 'add':
         case 'remove':
             if (players.length > 2) {
-                await game.updateMessage(players, p => message(game, players, ctx, p), event.interaction);
+                game.updateMessage(players, p => message(game, players, ctx, p), event.interaction);
             }
         break;
         case 'interaction':
-            const guildid = game.getGuild();
             const i = event.interaction;
             if (i.customId.startsWith('answer_')) {
-                const prompt = await getBlackCard(guildid, ctx.prompt);
+                const prompt = getBlackCard(game, ctx.prompt);
                 const blanks = countBlanks(prompt);
                 const winner = ctx.shuffle[parseInt(i.customId.substring(7))];
             
@@ -89,14 +88,13 @@ export const readLogic: Logic<boolean, RoundContext> = async (game, players, ctx
                 if (ctx.quiplash) {
                     answers = ctx.playing[winner] as string[];
                 } else if (ctx.playing[winner] === 'double') {
-                    answers = await Promise.all(ctx.doubleornothing![winner].cards.map(c => getWhiteCard(guildid, c)));
+                    answers = ctx.doubleornothing![winner].cards.map(c => getWhiteCard(game, c));
                     const missing = blanks - answers.length;
                     for (let i = 0; i < missing; i++) {
                         answers.push(answers[i]);
                     }
                 } else {
-                    answers = await Promise.all((ctx.playing[winner] as (number | null)[])
-                        .map(i => getWhiteCard(guildid, ctx.hand[winner][i!])));
+                    answers = (ctx.playing[winner] as (number | null)[]).map(i => getWhiteCard(game, ctx.hand[winner][i!]));
                 }
 
                 const answer = `> ${fillBlanks(prompt, answers)}`;
@@ -134,12 +132,11 @@ export const readLogic: Logic<boolean, RoundContext> = async (game, players, ctx
                 if (!ctx.quiplash) {
                     ctx.lastWinner = winner;
                 }
-                await game.closeMessage(players, undefined, i);
-                await game.send(players, { embeds: [{ fields }]});
+                game.closeMessage(players, undefined, i);
+                game.send(players, { embeds: [{ fields }]});
                 return true;
             }
         break;
         }
     }
-    return false;
 }

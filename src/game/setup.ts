@@ -1,5 +1,5 @@
-import { APIActionRowComponent, APIEmbed, APIMessageActionRowComponent, APIMessageComponentEmoji, ButtonInteraction, ButtonStyle, ComponentEmojiResolvable, ComponentType, Snowflake, StringSelectMenuInteraction, User } from 'discord.js'
-import { Generator, Transformer, Game, Logic } from './logic'
+import { APIActionRowComponent, APIEmbed, APIMessageActionRowComponent, APIMessageComponentEmoji, ButtonInteraction, ButtonStyle, ComponentType, Snowflake, StringSelectMenuInteraction, User } from 'discord.js'
+import { Transformer, Game, Logic } from './logic'
 
 export type Arg = Flags | MultiChoice | Number;
 
@@ -40,7 +40,7 @@ export type SetupContext<T extends readonly Arg[]> = { [A in T[number] as A['nam
     A extends Number      ?  number   : never
 };
 
-export type SetupMessageGenerator<A extends readonly Arg[]> = Generator<APIEmbed, SetupContext<A>>;
+export type SetupMessageGenerator<A extends readonly Arg[]> = Transformer<void, APIEmbed, SetupContext<A>>;
 
 export type GameStarter<C, A extends readonly Arg[]> = Transformer<ButtonInteraction, C | null, SetupContext<A>>
 
@@ -58,8 +58,8 @@ export function setup<C extends NonNullable<unknown>, A extends readonly Arg[]>(
     starter: GameStarter<C, A>,
     message: SetupMessageGenerator<A> = defaultMessageGenerator,
 ): Logic<C | null, SetupContext<A>> {
-    async function fullMessage(game: Game, players: User[], ctx: SetupContext<A>) {
-        const embeds = [await message(game, players, ctx)];
+    function fullMessage(game: Game, players: User[], ctx: SetupContext<A>) {
+        const embeds = [message(game, players, ctx)];
         const components: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
 
         for (const arg of args) {
@@ -160,36 +160,37 @@ export function setup<C extends NonNullable<unknown>, A extends readonly Arg[]>(
             forceList: false,
         };
     }
-    return async (game, players, ctx, events) => {
-        for await (const event of events) {
+    return function* (game, players, ctx) {
+        while (true) {
+            const event = yield;
             switch (event.type) {
             case 'start':
-                await game.updateLobby(await fullMessage(game, players, ctx), event.interaction);
+                game.updateLobby(fullMessage(game, players, ctx), event.interaction);
                 break;
             case 'interaction':
                 switch (event.interaction.customId) {
                 case '_close':
-                    await game.closeLobby(undefined, event.interaction);
+                    game.closeLobby(undefined, event.interaction);
                     return null;
                 case '_join':
-                    if (await game.addPlayer(event.interaction.user)) {
-                        await game.updateLobby(await fullMessage(game, players, ctx), event.interaction);
+                    if (game.addPlayer(event.interaction.user)) {
+                        game.updateLobby(fullMessage(game, players, ctx), event.interaction);
                     } else {
-                        await event.interaction.reply({
+                        event.interaction.reply({
                             content: 'You have already joined!',
                             ephemeral: true
                         });
                     }
                     break;
                 case '_leave':
-                    if (await game.removePlayer(event.interaction.user)) {
-                        await game.updateLobby(await fullMessage(game, players, ctx), event.interaction);
+                    if (game.removePlayer(event.interaction.user)) {
+                        game.updateLobby(fullMessage(game, players, ctx), event.interaction);
                     } else {
-                        await event.interaction.reply({ content: 'You have not even joined!', ephemeral: true });
+                        event.interaction.reply({ content: 'You have not even joined!', ephemeral: true });
                     }
                     break;
                 case '_start':
-                    const t = await starter(game, players, ctx, event.interaction as ButtonInteraction);
+                    const t = starter(game, players, ctx, event.interaction as ButtonInteraction);
                     if (t !== null) return t;
                     break;
                 }
@@ -222,10 +223,9 @@ export function setup<C extends NonNullable<unknown>, A extends readonly Arg[]>(
                     break;
                 }
             
-                await game.updateLobby(await fullMessage(game, players, ctx), event.interaction);
+                game.updateLobby(fullMessage(game, players, ctx), event.interaction);
                 break;
             }
         }
-        return null;
     };
 }

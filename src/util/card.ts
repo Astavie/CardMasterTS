@@ -62,7 +62,7 @@ export function escapeDiscord(s: string) {
     return s.replace(/[\\_*[\]<>()|~`]/g, '\\$&');
 }
 
-export async function fillModal(prompt: string, i: MessageComponentInteraction, customId: string = "fill_modal") {
+export function fillModal(prompt: string, i: MessageComponentInteraction, customId: string = "fill_modal") {
     const split = prompt.replace(/\\(.)/g, "$1").split('_'); // remove escaping backslashes
 
     for (let i = 0; i < split.length - 1; i++) {
@@ -94,7 +94,7 @@ export async function fillModal(prompt: string, i: MessageComponentInteraction, 
         }
     }
 
-    await i.showModal({
+    i.showModal({
         customId,
         title: "Fill in the blanks",
         components: split.map((s, i) => ({

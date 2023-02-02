@@ -1,15 +1,9 @@
 import { ButtonInteraction, Snowflake, User } from 'discord.js';
-import { db, loadPack } from '../../db';
-import { countBlanks, escapeDiscord, shuffle } from '../../util/card';
-import { Game } from '../logic';
+import { db } from '../../db';
+import { countBlanks, shuffle } from '../../util/card';
+import { Game, Pack } from '../logic';
 import { setup, SetupContext } from '../setup';
-import { Card, GameContext, getBlackCard, getCard, getWhiteCard, Pack, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
-
-function escapePack(p: Pack) {
-    p.cards.white = p.cards.white.map(escapeDiscord);
-    p.cards.black = p.cards.black.map(getCard).map(escapeDiscord);
-    return p;
-}
+import { Card, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
 
 const config = [{
     type: 'choice',
@@ -53,15 +47,7 @@ export const defaultSetup: CAHSetupContext = {
     "Hand cards": config[3].default,
 }
 
-export const packs: {[key:string]:{[key:string]:Pack}} = {};
-
-export async function getPack(guildid: Snowflake, pack: string): Promise<Pack> {
-    packs[guildid] ??= {};
-    packs[guildid][pack] ??= escapePack(await loadPack(guildid, pack));
-    return packs[guildid][pack];
-}
-
-async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonInteraction): Promise<GameContext | null> {
+function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonInteraction): GameContext | null {
     if (players.length < 2) {
         i.reply({
             content: 'You need at least two players to start.',
@@ -75,8 +61,10 @@ async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: B
 
     const guildid = game.getGuild();
     const names = Object.keys(db[guildid]?.packs ?? {});
+    const rawnames: string[] = [];
     for (const pack of ctx['Packs']) {
-        const p: Pack = await getPack(guildid, names[pack])
+        const p: Pack = game.getPack(names[pack])!
+        rawnames.push(p.rawname);
         for (let i = 0; i < p.cards.white.length; i++)
             whiteDeck.push([p.rawname, i]);
         for (let i = 0; i < p.cards.black.length; i++)
@@ -95,14 +83,14 @@ async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: B
         return null;
     }
 
-    const prompt = await realizeBlackCard(guildid, blackCard, players);
-    const blanks = countBlanks(await getBlackCard(guildid, prompt));
+    const prompt = realizeBlackCard(game, blackCard, players);
+    const blanks = countBlanks(getBlackCard(game, prompt));
 
     let totalCards = ctx['Hand cards'] * players.length;
     if (ctx['Rules'][0]) totalCards += blanks;
 
     if (whiteDeck.length < totalCards) {
-        await i.reply({
+        i.reply({
             content: 'There are not enough white cards in the selected packs to start the game.',
             ephemeral: true
         });
@@ -110,8 +98,8 @@ async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: B
     }
 
     // LET'S GO
-    await game.closeLobby(undefined, i, ['_join', '_leave', '_close']);
-    await game.allowSpectators();
+    game.closeLobby(undefined, i, ['_join', '_leave', '_close']);
+    game.allowSpectators();
 
     // rando's cards
     const points = Object.fromEntries(players.map(player => [player.id, 0]))
@@ -121,7 +109,7 @@ async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: B
         randoPlaying = [];
         while (randoPlaying.length < blanks) {
             const card = whiteDeck.pop()!;
-            randoPlaying.push(await realizeWhiteCard(guildid, card, players));
+            randoPlaying.push(realizeWhiteCard(game, card, players));
         }
     }
 
@@ -130,9 +118,10 @@ async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: B
         const playing: {[key:string]:string[]|null} = Object.fromEntries(players.map(player => [player.id, null]));
         delete playing[players[0].id];
         if (randoPlaying) {
-            playing[randoId] = await Promise.all(randoPlaying.map(c => getWhiteCard(guildid, c)));
+            playing[randoId] = randoPlaying.map(c => getWhiteCard(game, c));
         }
         round = {
+            packs: rawnames,
             quiplash: true,
             maxPoints: ctx['Max points'],
             czar: 0,
@@ -151,7 +140,7 @@ async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: B
 
             while (phand.length < ctx['Hand cards']) {
                 const card = whiteDeck.pop()!;
-                phand.push(await realizeWhiteCard(guildid, card, players));
+                phand.push(realizeWhiteCard(game, card, players));
             }
         }
         const playing = Object.fromEntries(players.map(player => [player.id, Array(blanks).fill(null)]));
@@ -161,6 +150,7 @@ async function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: B
             playing[randoId] = [...Array(blanks).keys()];
         }
         round = {
+            packs: rawnames,
             quiplash: false,
             doubleornothing: ctx['Rules'][1] ? {} : undefined,
             handCards: ctx['Hand cards'],

@@ -14,7 +14,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBit
 // When the client is ready, run this code (only once)
 client.once('ready', async () => {
     const guilds = await client.guilds.fetch();
-    
+
     guilds.each(async guild => {
         const id = guild.id;
         const s = createSave(id);
@@ -97,7 +97,11 @@ client.on('interactionCreate', interaction => {
 
     switch (interaction.commandName) {
         case "ping":
-            interaction.reply('hurb');
+            if (Math.random() < 0.1) {
+                interaction.reply('pong');
+            } else {
+                interaction.reply('hurb');
+            }
             return;
         case "pack":
             switch (interaction.options.getSubcommand()) {

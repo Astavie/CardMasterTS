@@ -1,27 +1,15 @@
 import { randomInt } from "crypto";
-import { Snowflake, User } from "discord.js";
+import { User } from "discord.js";
+import { db } from "../../db";
 import { countRealizations, realizeCard } from "../../util/card";
-import { GameType } from "../game";
-import { forward, ContextOf, sequence, or, loop, then } from "../logic";
-import { gameResultLogic, joinLeaveLogic, prepareRound } from "./game";
+import { forward, ContextOf, sequence, or, loop, then, Game, GameType, before, Logic } from "../logic";
+import { gameResult, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
 import { readLogic } from "./read";
-import { defaultSetup, getPack, setupLogic } from "./setup";
+import { defaultSetup, setupLogic } from "./setup";
 
 export type Card = [string, number, string[]]; // [pack, card, realizations]
 export type UnrealizedCard = Card | [string, number]; // [pack, card]
-
-export type Pack = {
-    name: string
-    rawname: string
-    cards: {
-        white: string[]
-        black: ({
-            text: string,
-            pick: number,
-        } | string)[]
-    }
-}
 
 export function getPlayerList(players: User[], rando: boolean) {
     const ids = players.map(p => p.toString() as string);
@@ -41,22 +29,22 @@ export function getPointsList(players: User[], points: {[key: string]: number}, 
 
 export const randoId = "rando";
 
-export async function getWhiteCard(guild: Snowflake, card: Card) {
-    return realizeCard((await getPack(guild, card[0])).cards.white[card[1]], card[2]);
+export function getWhiteCard(game: Game, card: Card) {
+    return realizeCard(game.getPack(card[0])!.cards.white[card[1]], card[2]);
 }
 
 export function getCard(card: string | { text: string }): string {
     return typeof card === 'string' ? card : card.text;
 }
 
-export async function getBlackCard(guild: Snowflake, card: Card) {
-    return realizeCard(getCard((await getPack(guild, card[0])).cards.black[card[1]]), card[2]);
+export function getBlackCard(game: Game, card: Card) {
+    return realizeCard(getCard(game.getPack(card[0])!.cards.black[card[1]]), card[2]);
 }
 
-export async function realizeWhiteCard(guild: Snowflake, card: UnrealizedCard, players: User[]): Promise<Card> {
+export function realizeWhiteCard(game: Game, card: UnrealizedCard, players: User[]): Card {
     if (card[2]) return card as Card;
 
-    const spots = countRealizations((await getPack(guild, card[0])).cards.white[card[1]]);
+    const spots = countRealizations(game.getPack(card[0])!.cards.white[card[1]]);
     const fills: string[] = [];
     for (let i = 0; i < spots; i++) {
         fills.push(players[randomInt(players.length)].toString());
@@ -64,10 +52,10 @@ export async function realizeWhiteCard(guild: Snowflake, card: UnrealizedCard, p
     return [card[0], card[1], fills];
 }
 
-export async function realizeBlackCard(guild: Snowflake, card: UnrealizedCard, players: User[]): Promise<Card> {
+export function realizeBlackCard(game: Game, card: UnrealizedCard, players: User[]): Card {
     if (card[2]) return card as Card;
 
-    const spots = countRealizations(getCard((await getPack(guild, card[0])).cards.black[card[1]]));
+    const spots = countRealizations(getCard(game.getPack(card[0])!.cards.black[card[1]]));
     const fills: string[] = [];
     for (let i = 0; i < spots; i++) {
         fills.push(players[randomInt(players.length)].toString());
@@ -77,6 +65,7 @@ export async function realizeBlackCard(guild: Snowflake, card: UnrealizedCard, p
 
 // -- round logic --
 export type BaseRoundContext = {
+    packs: string[],
     shuffle: string[],
     prompt: Card,
     czar: number,
@@ -111,23 +100,47 @@ export type RoundContext = CardRoundContext | QuiplashRoundContext;
 const roundLogic = sequence(handLogic, readLogic); 
 export type GameContext = ContextOf<typeof roundLogic>;
 
+const loadPacks: Logic<void, GlobalContext> = function* (game, _, ctx) {
+    // get names of used packs
+    let names: string[];
+    if ('a' in ctx) {
+        // setup: all guild packs
+        names = Object.keys(db[game.getGuild()]?.packs ?? {});
+    } else {
+        // round: used packs
+        names = ctx.b.ctx.packs;
+    }
+
+    // load packs
+    for (const name of names) {
+        game.loadPack(name);
+    }
+
+    // wait for packs to be loaded
+    let loaded = 0;
+    while (loaded < names.length) {
+        const event = yield;
+        if (event.type === 'pack_loaded') loaded += 1;
+    }
+}
+
 // -- game logic --
-const gameLogic = or(
+const gameLogic = then(
     loop(then(
         or(joinLeaveLogic, roundLogic),
-        prepareRound)
-    ),
-    gameResultLogic
+        prepareRound,
+    )),
+    gameResult,
 );
 
 // -- global logic --
-const globalLogic = forward(setupLogic, gameLogic)
+const globalLogic = forward(setupLogic, gameLogic);
 type GlobalContext = ContextOf<typeof globalLogic>;
 
 export const CAH: GameType<GlobalContext> = {
     name: "Crappy Ableist Humor",
     color: 0x000000,
-    logic: globalLogic,
+    logic: before(loadPacks, globalLogic),
     initialContext() {
         return {
             a: defaultSetup,
