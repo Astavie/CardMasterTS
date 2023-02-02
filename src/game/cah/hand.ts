@@ -1,13 +1,13 @@
 import { APIActionRowComponent, APIButtonComponentWithCustomId, APIEmbedField, APIMessageActionRowComponent, ButtonStyle, ComponentType, MessageComponentInteraction, ModalMessageModalSubmitInteraction, TextInputModalData, User } from 'discord.js';
-import { countBlanks, escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
+import { escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { Game, Logic } from '../logic';
-import { getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
+import { countBlanks, getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
 
 function message(game: Game, players: User[], ctx: RoundContext, player: User | null): MessageOptions {
     let prompt = getBlackCard(game, ctx.prompt);
-    const blanks = countBlanks(prompt);
-    
+    const blanks = countBlanks(game, ctx.prompt);
+
     const fields: APIEmbedField[] = [];
     const components: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
 
@@ -134,8 +134,7 @@ export const handLogic: Logic<void, RoundContext> = function* (game, players, ct
             if (!ctx.quiplash) {
                 if (i.customId === 'double') {
                     if (ctx.playing[i.user.id] === 'double') {
-                        const prompt = getBlackCard(game, ctx.prompt);
-                        const blanks = countBlanks(prompt);
+                        const blanks = countBlanks(game, ctx.prompt);
                         ctx.playing[i.user.id] = Array(blanks).fill(null)
                         game.updateMessage(players, p => message(game, players, ctx, p), i);
                     } else {
@@ -143,8 +142,7 @@ export const handLogic: Logic<void, RoundContext> = function* (game, players, ct
                         if (resolveWhenPlayersDone(game, players, ctx, i)) return;
                     }
                 } else if (i.customId.startsWith('hand_')) {
-                    const prompt = getBlackCard(game, ctx.prompt);
-                    const blanks = countBlanks(prompt);
+                    const blanks = countBlanks(game, ctx.prompt);
                     const hand = parseInt(i.customId.substring(5));
 
                     const player = i.user;
@@ -189,8 +187,7 @@ export const handLogic: Logic<void, RoundContext> = function* (game, players, ct
                             ctx.playing[i.user.id] = null;
                             game.updateMessage(players, p => message(game, players, ctx, p), i);
                         } else {
-                            const prompt = getBlackCard(game, ctx.prompt);
-                            const blanks = countBlanks(prompt);
+                            const blanks = countBlanks(game, ctx.prompt);
 
                             const count = Object.values(ctx.playing).filter(p => p === 'random').length + 1;
                             if (count * blanks > ctx.whiteDeck.length) {
@@ -224,8 +221,7 @@ function resolveWhenPlayersDone(game: Game, players: User[], ctx: RoundContext, 
     if (allPlayersDone(ctx)) {
         // put random cards in
         if (ctx.quiplash) {
-            const prompt = getBlackCard(game, ctx.prompt);
-            const blanks = countBlanks(prompt);
+            const blanks = countBlanks(game, ctx.prompt);
             for (const player of Object.keys(ctx.playing)) {
                 if (ctx.playing[player] === 'random') {
                     const cards: string[] = [];

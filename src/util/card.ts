@@ -4,7 +4,7 @@ import { ComponentType, MessageComponentInteraction, TextInputStyle } from "disc
 // '_'  (a blank) gets replaced with some text defined by the game/user
 // '{}' (a player spot) gets replaced by a random player's name
 
-export function countBlanks(card: string) {
+export function countBlanks2(card: string) {
     return card.match(/\\_/gi)?.length || 1;
 }
 
@@ -62,7 +62,7 @@ export function escapeDiscord(s: string) {
     return s.replace(/[\\_*[\]<>()|~`]/g, '\\$&');
 }
 
-export function fillModal(prompt: string, i: MessageComponentInteraction, customId: string = "fill_modal") {
+export async function fillModal(prompt: string, i: MessageComponentInteraction, customId: string = "fill_modal") {
     const split = prompt.replace(/\\(.)/g, "$1").split('_'); // remove escaping backslashes
 
     for (let i = 0; i < split.length - 1; i++) {
@@ -94,7 +94,7 @@ export function fillModal(prompt: string, i: MessageComponentInteraction, custom
         }
     }
 
-    i.showModal({
+    await i.showModal({
         customId,
         title: "Fill in the blanks",
         components: split.map((s, i) => ({

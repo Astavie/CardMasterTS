@@ -1,9 +1,9 @@
 import { ButtonInteraction, Snowflake, User } from 'discord.js';
 import { db } from '../../db';
-import { countBlanks, shuffle } from '../../util/card';
+import { shuffle } from '../../util/card';
 import { Game, Pack } from '../logic';
 import { setup, SetupContext } from '../setup';
-import { Card, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
+import { Card, countBlanks, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
 
 const config = [{
     type: 'choice',
@@ -84,7 +84,7 @@ function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonI
     }
 
     const prompt = realizeBlackCard(game, blackCard, players);
-    const blanks = countBlanks(getBlackCard(game, prompt));
+    const blanks = countBlanks(game, blackCard);
 
     let totalCards = ctx['Hand cards'] * players.length;
     if (ctx['Rules'][0]) totalCards += blanks;

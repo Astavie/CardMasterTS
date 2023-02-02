@@ -1,6 +1,5 @@
-import { countBlanks } from '../../util/card';
 import { Logic, Transformer } from '../logic';
-import { Card, CardRoundContext, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
+import { Card, CardRoundContext, countBlanks, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
 export const prepareRound: Transformer<boolean, boolean, GameContext> = (game, players, ctx, resume) => {
     if (!resume) {
@@ -26,7 +25,7 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = (game, p
     }
 
     ctx.ctx.prompt = realizeBlackCard(game, card, players);
-    const blanks = countBlanks(getBlackCard(game, ctx.ctx.prompt));
+    const blanks = countBlanks(game, ctx.ctx.prompt);
 
     // Remove played cards
     if (!ctx.ctx.quiplash) {
@@ -155,7 +154,7 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = function* (game, play
                     hand.push(realizeWhiteCard(game, card, players));
                 }
 
-                const blanks = countBlanks(getBlackCard(game, ctx.ctx.prompt));
+                const blanks = countBlanks(game, ctx.ctx.prompt);
                 ctx.ctx.hand[i.user.id] = hand;
                 ctx.ctx.playing[i.user.id] = Array(blanks).fill(null);
             }

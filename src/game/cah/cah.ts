@@ -1,7 +1,7 @@
 import { randomInt } from "crypto";
 import { User } from "discord.js";
 import { db } from "../../db";
-import { countRealizations, realizeCard } from "../../util/card";
+import { countBlanks2, countRealizations, realizeCard } from "../../util/card";
 import { forward, ContextOf, sequence, or, loop, then, Game, GameType, before, Logic } from "../logic";
 import { gameResult, joinLeaveLogic, prepareRound } from "./game";
 import { handLogic } from "./hand";
@@ -39,6 +39,12 @@ export function getCard(card: string | { text: string }): string {
 
 export function getBlackCard(game: Game, card: Card) {
     return realizeCard(getCard(game.getPack(card[0])!.cards.black[card[1]]), card[2]);
+}
+
+export function countBlanks(game: Game, card: UnrealizedCard) {
+    const entry = game.getPack(card[0])!.cards.black[card[1]];
+    if (typeof(entry) === 'string') return countBlanks2(entry);
+    return entry.pick;
 }
 
 export function realizeWhiteCard(game: Game, card: UnrealizedCard, players: User[]): Card {

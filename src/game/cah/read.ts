@@ -1,12 +1,12 @@
 import { APIActionRowComponent, APIEmbedField, APIMessageActionRowComponent, ButtonStyle, ComponentType, User } from 'discord.js';
-import { bolden, countBlanks, fillBlanks } from '../../util/card';
+import { bolden, fillBlanks } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { Game, Logic } from '../logic';
-import { getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
+import { countBlanks, getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
 
 function message(game: Game, players: User[], ctx: RoundContext, player: User | null): MessageOptions {
     const prompt = getBlackCard(game, ctx.prompt);
-    const blanks = countBlanks(prompt);
+    const blanks = countBlanks(game, ctx.prompt);
 
     const answers = ctx.shuffle.map((p, i) => {
         let answers: string[];
@@ -81,7 +81,7 @@ export const readLogic: Logic<true, RoundContext> = function* (game, players, ct
             const i = event.interaction;
             if (i.customId.startsWith('answer_')) {
                 const prompt = getBlackCard(game, ctx.prompt);
-                const blanks = countBlanks(prompt);
+                const blanks = countBlanks(game, ctx.prompt);
                 const winner = ctx.shuffle[parseInt(i.customId.substring(7))];
             
                 let answers: string[];
