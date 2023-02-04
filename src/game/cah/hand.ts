@@ -2,7 +2,7 @@ import { APIActionRowComponent, APIButtonComponentWithCustomId, APIEmbedField, A
 import { escapeDiscord, fillBlanks, fillModal, shuffle } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { Game, Logic } from '../logic';
-import { countBlanks, getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
+import { Card, countBlanks, getBlackCard, getWhiteCard, randoId, realizeWhiteCard, RoundContext } from './cah';
 
 function message(game: Game, players: User[], ctx: RoundContext, player: User | null): MessageOptions {
     let prompt = getBlackCard(game, ctx.prompt);
@@ -11,28 +11,19 @@ function message(game: Game, players: User[], ctx: RoundContext, player: User | 
     const fields: APIEmbedField[] = [];
     const components: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
 
-    const allPlaying = Object.entries(ctx.playing).filter(([k, _v]) => k !== randoId).map(([_k, v]) => v);
-    const playedCards = ctx.quiplash ? allPlaying.filter(p => p !== null).length : allPlaying.filter(p => !p.includes(null)).length;
+    const allPlaying = Object.entries(ctx.result).filter(([k, _v]) => k !== randoId).map(([_k, v]) => v);
+    const playedCards = allPlaying.filter(p => !p.includes('\\_')).length;
     const totalPlayers = players.length - 1;
 
     if (player && player !== players[ctx.czar]) {
 
         if (!ctx.quiplash) {
 
+            prompt = ctx.result[player.id] ?? prompt;
+            const filled = !prompt.includes('\\_');
+
             const playing = ctx.playing[player.id];
             const hand = ctx.hand[player.id];
-
-            let cards: (string | null)[] = [];
-            if (playing === 'double') {
-                cards = ctx.doubleornothing![player.id].cards.map(c => getWhiteCard(game, c));
-                const missing = blanks - cards.length;
-                for (let i = 0; i < missing; i++) {
-                    cards.push(cards[i]);
-                }
-            } else {
-                cards = playing.map(i => i !== null ? getWhiteCard(game, hand[i]) : null);
-            }
-            prompt = fillBlanks(prompt, cards);
 
             fields.push({
                 name: 'Hand',
@@ -44,8 +35,8 @@ function message(game: Game, players: User[], ctx: RoundContext, player: User | 
                 value: ctx.doubleornothing[player.id].cards.map(c => getWhiteCard(game, c)).join('\n'),
             })
 
-            const playingStyle    = (playing !== 'double' && !playing.includes(null)) ? ButtonStyle.Success : ButtonStyle.Primary;
-            const disableUnplayed = (playing !== 'double' && !playing.includes(null)) && blanks > 1;
+            const playingStyle    = filled ? ButtonStyle.Success : ButtonStyle.Primary;
+            const disableUnplayed = playing !== 'double' && filled && playing.length > 1;
 
             components.push(...createButtonGrid(ctx.handCards, i => ({
                 style: playing !== 'double' && playing.includes(i) ? playingStyle : ButtonStyle.Secondary,
@@ -56,8 +47,10 @@ function message(game: Game, players: User[], ctx: RoundContext, player: User | 
 
         } else {
 
+            prompt = ctx.result[player.id] ?? prompt;
             const playing = ctx.playing[player.id];
-            if (playing !== 'random' && playing !== null) prompt = fillBlanks(prompt, playing);
+
+            // if (playing !== 'random' && playing !== null) [prompt] = fillBlanks(prompt, blanks, playing);
 
             components.push({
                 type: ComponentType.ActionRow,
@@ -134,46 +127,60 @@ export const handLogic: Logic<void, RoundContext> = function* (game, players, ct
             if (!ctx.quiplash) {
                 if (i.customId === 'double') {
                     if (ctx.playing[i.user.id] === 'double') {
-                        const blanks = countBlanks(game, ctx.prompt);
-                        ctx.playing[i.user.id] = Array(blanks).fill(null)
+                        ctx.playing[i.user.id] = []
+                        ctx.result[i.user.id] = getResult(game, ctx, []);
                         game.updateMessage(players, p => message(game, players, ctx, p), i);
                     } else {
                         ctx.playing[i.user.id] = 'double';
+                        ctx.result[i.user.id] = getResult(game, ctx, ctx.doubleornothing![i.user.id].cards.map(c => getWhiteCard(game, c)));
                         if (resolveWhenPlayersDone(game, players, ctx, i)) return;
                     }
                 } else if (i.customId.startsWith('hand_')) {
                     const blanks = countBlanks(game, ctx.prompt);
                     const hand = parseInt(i.customId.substring(5));
+                    const handCards = ctx.hand[i.user.id];
 
                     const player = i.user;
                     
                     if (ctx.playing[i.user.id] === 'double') {
-                        ctx.playing[i.user.id] = Array(blanks).fill(null);
+                        ctx.playing[i.user.id] = [];
+                        ctx.result[i.user.id] = getResult(game, ctx, []);
                     }
 
-                    const playing = ctx.playing[player.id] as (number | null)[];
+                    const playing = ctx.playing[player.id] as number[];
                     const pindex = playing.indexOf(hand);
                     
-                    let uindex = playing.indexOf(null);
-
                     if (pindex === -1) {
-                        if (uindex === -1) {
-                            if (blanks === 1) uindex = 0;
+                        if (!ctx.result[i.user.id].includes('\\_')) {
+                            if (blanks === 1) playing[0] = hand;
                             else break;
+                        } else {
+                            playing.push(hand);
                         }
-                        playing[uindex] = hand;
+                        ctx.result[i.user.id] = getResult(game, ctx, playing.map(i => getWhiteCard(game, handCards[i])));
 
-                        if (playing.indexOf(null) === -1) {
+                        if (!ctx.result[i.user.id].includes('\\_')) {
                             if (resolveWhenPlayersDone(game, players, ctx, i)) return;
                         } else {
                             game.updateMessage([player], message(game, players, ctx, player), i, false);
                         }
                     } else {
-                        playing[pindex] = null;
-                        
-                        if (uindex === -1) {
+                        // remove card and all its innards
+                        const splicer = (i: number) => {
+                            let card = playing.splice(i, 1)[0];
+                            const blanks = getWhiteCard(game, handCards[card]).match(/\\_/gi)?.length ?? 0
+                            for (let i = 0; i < blanks; i++) {
+                                if (playing.length <= i) break;
+                                splicer(i);
+                            }
+                        }
+                        splicer(pindex);
+
+                        if (!ctx.result[i.user.id].includes('\\_')) {
+                            ctx.result[i.user.id] = getResult(game, ctx, playing.map(i => getWhiteCard(game, handCards[i])));
                             game.updateMessage(players, p => message(game, players, ctx, p), i);
                         } else {
+                            ctx.result[i.user.id] = getResult(game, ctx, playing.map(i => getWhiteCard(game, handCards[i])));
                             game.updateMessage([player], message(game, players, ctx, player), i, false);
                         }
                     }
@@ -185,22 +192,34 @@ export const handLogic: Logic<void, RoundContext> = function* (game, players, ct
                     } else if (i.customId === 'random') {
                         if (ctx.playing[i.user.id] === 'random') {
                             ctx.playing[i.user.id] = null;
+                            ctx.result[i.user.id] = getResult(game, ctx, []);
                             game.updateMessage(players, p => message(game, players, ctx, p), i);
                         } else {
+                            const prompt = getBlackCard(game, ctx.prompt);
                             const blanks = countBlanks(game, ctx.prompt);
 
-                            const count = Object.values(ctx.playing).filter(p => p === 'random').length + 1;
-                            if (count * blanks > ctx.whiteDeck.length) {
+                            let randoPlaying: string[] = [];
+                            let randoResult: string = fillBlanks(prompt, blanks, []);
+                            while (randoResult.includes('\\_')) {
+                                const card = ctx.whiteDeck.pop();
+                                if (!card) break;
+
+                                randoPlaying.push(getWhiteCard(game, realizeWhiteCard(game, card, players)));
+                                randoResult = fillBlanks(prompt, blanks, randoPlaying);
+                            }
+                            if (randoResult.includes('\\_')) {
                                 i.reply({ content: 'There are not enough white cards left for this option!', ephemeral: true });
                                 break;
                             }
 
                             ctx.playing[i.user.id] = 'random';
+                            ctx.result[i.user.id] = randoResult;
                             if (resolveWhenPlayersDone(game, players, ctx, i)) return;
                         }
                     }
                 } else if (i.isModalSubmit() && i.customId === 'fill_modal') {
                     ctx.playing[i.user.id] = (i as ModalMessageModalSubmitInteraction).components.map(c => escapeDiscord((c.components[0] as TextInputModalData).value));
+                    ctx.result[i.user.id] = getResult(game, ctx, ctx.playing[i.user.id] as string[]);
                     if (resolveWhenPlayersDone(game, players, ctx, i)) return;
                 }
             }
@@ -209,30 +228,22 @@ export const handLogic: Logic<void, RoundContext> = function* (game, players, ct
     }
 };
 
+function getResult(game: Game, ctx: RoundContext, playing: string[], loop = false): string {
+    const prompt = getBlackCard(game, ctx.prompt);
+    const holes = countBlanks(game, ctx.prompt);
+    return fillBlanks(prompt, holes, playing, loop);
+}
+
 function allPlayersDone(ctx: RoundContext): boolean {
     if (ctx.quiplash) {
         return Object.values(ctx.playing).every(p => p !== null);
     } else {
-        return Object.values(ctx.playing).every(p => p === 'double' || !p.includes(null));
+        return Object.values(ctx.result).every(p => !p.includes('\\_'));
     }
 }
 
 function resolveWhenPlayersDone(game: Game, players: User[], ctx: RoundContext, i: MessageComponentInteraction | ModalMessageModalSubmitInteraction | undefined) {
     if (allPlayersDone(ctx)) {
-        // put random cards in
-        if (ctx.quiplash) {
-            const blanks = countBlanks(game, ctx.prompt);
-            for (const player of Object.keys(ctx.playing)) {
-                if (ctx.playing[player] === 'random') {
-                    const cards: string[] = [];
-                    while (cards.length < blanks) {
-                        cards.push(getWhiteCard(game, realizeWhiteCard(game, ctx.whiteDeck.pop()!, players)));
-                    }
-                    ctx.playing[player] = cards;
-                }
-            }
-        }
-
         // shuffle everyone
         ctx.shuffle = shuffle(Object.keys(ctx.playing));
 

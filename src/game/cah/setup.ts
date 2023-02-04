@@ -1,6 +1,6 @@
 import { ButtonInteraction, Snowflake, User } from 'discord.js';
 import { db } from '../../db';
-import { shuffle } from '../../util/card';
+import { fillBlanks, shuffle } from '../../util/card';
 import { Game, Pack } from '../logic';
 import { setup, SetupContext } from '../setup';
 import { Card, countBlanks, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard, RoundContext, UnrealizedCard } from './cah';
@@ -86,8 +86,24 @@ function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonI
     const prompt = realizeBlackCard(game, blackCard, players);
     const blanks = countBlanks(game, blackCard);
 
-    let totalCards = ctx['Hand cards'] * players.length;
-    if (ctx['Rules'][0]) totalCards += blanks;
+    const totalCards = ctx['Hand cards'] * players.length;
+    const fullPrompt = fillBlanks(getBlackCard(game, prompt), blanks, []);
+
+    // rando's cards
+    let randoPlaying: Card[] | null = null;
+    let randoResult: string | null = null;
+    if (ctx['Rules'][0]) {
+        randoPlaying = [];
+        randoResult = fullPrompt;
+
+        while (randoResult.includes('\\_')) {
+            const card = whiteDeck.pop();
+            if (!card) break;
+
+            randoPlaying.push(realizeWhiteCard(game, card, players));
+            randoResult = fillBlanks(getBlackCard(game, prompt), blanks, randoPlaying.map(c => getWhiteCard(game, c)));
+        }
+    }
 
     if (whiteDeck.length < totalCards) {
         i.reply({
@@ -101,24 +117,18 @@ function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonI
     game.closeLobby(undefined, i, ['_join', '_leave', '_close']);
     game.allowSpectators();
 
-    // rando's cards
     const points = Object.fromEntries(players.map(player => [player.id, 0]))
-    let randoPlaying: Card[] | null = null;
-    if (ctx['Rules'][0]) {
-        points[randoId] = 0;
-        randoPlaying = [];
-        while (randoPlaying.length < blanks) {
-            const card = whiteDeck.pop()!;
-            randoPlaying.push(realizeWhiteCard(game, card, players));
-        }
-    }
+    const result: {[key:string]:string} = Object.fromEntries(players.map(player => [player.id, fullPrompt]));
 
     let round: RoundContext;
     if (ctx['Rules'][2]) {
         const playing: {[key:string]:string[]|null} = Object.fromEntries(players.map(player => [player.id, null]));
         delete playing[players[0].id];
+        delete result[players[0].id];
         if (randoPlaying) {
+            points[randoId] = 0;
             playing[randoId] = randoPlaying.map(c => getWhiteCard(game, c));
+            result[randoId] = randoResult!;
         }
         round = {
             packs: rawnames,
@@ -130,6 +140,7 @@ function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonI
             whiteDeck,
             blackDeck,
             prompt,
+            result,
             shuffle: [],
         };
     } else {
@@ -143,11 +154,14 @@ function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonI
                 phand.push(realizeWhiteCard(game, card, players));
             }
         }
-        const playing = Object.fromEntries(players.map(player => [player.id, Array(blanks).fill(null)]));
+        const playing: {[key:string]:number[]} = Object.fromEntries(players.map(player => [player.id, []]));
         delete playing[players[0].id];
+        delete result[players[0].id];
         if (randoPlaying) {
+            points[randoId] = 0;
             hand[randoId] = randoPlaying;
-            playing[randoId] = [...Array(blanks).keys()];
+            playing[randoId] = [...Array(randoPlaying.length).keys()];
+            result[randoId] = randoResult!;
         }
         round = {
             packs: rawnames,
@@ -161,6 +175,7 @@ function startGame(game: Game, players: User[], ctx: CAHSetupContext, i: ButtonI
             whiteDeck,
             blackDeck,
             prompt,
+            result,
             shuffle: [],
             hand,
         };

@@ -175,8 +175,8 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
             console.error(`--- ERROR ---`);
             console.error(error)
             console.error(`encountered during a game of "${this.type.name}" inside guild ${this.guild} at ${now}`);
-            console.error(`event: ${event}`)
-            console.error(`game.context: ${this.context}`)
+            console.error(`event: %O`, event)
+            console.error(`game.context: %O`, this.context)
             console.error(`-------------`);
             
             this.report(`An error occurred while running the game, causing the game to close prematurely\nPlease report this to Astavie#2920 with the timestamp ${now}`)

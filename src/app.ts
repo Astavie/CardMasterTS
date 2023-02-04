@@ -37,7 +37,7 @@ client.once('ready', async () => {
                 console.error(`--- ERROR ---`);
                 console.error(error);
                 console.error(`encountered while loading a game of "${game.name}" inside guild ${id} at ${now}`);
-                console.error(`save: ${JSON.stringify(save)}`)
+                console.error(`save: %O`, save)
                 console.error(`-------------`);
             });
         }
