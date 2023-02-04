@@ -1,1 +1,2 @@
 - closing thread crashes bot
+- the main branch can be pushed to

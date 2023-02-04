@@ -7,7 +7,6 @@ import { ChannelType, Client, GatewayIntentBits } from 'discord.js';
 import { GameImpl, games, gametypes } from "./game/game";
 import { createSave, db, loadGames, refreshPack, saveGames } from "./db";
 import { existsSync } from "fs";
-import { escapeDiscord } from "./util/card";
 
 // Create a new client instance
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages] });
