@@ -25,6 +25,7 @@ const commands = [
         .addSubcommand(new SlashCommandSubcommandBuilder()
             .setName('refresh')
             .addStringOption(option => option.setName('pack').setDescription('The pack to refresh.').setRequired(true))
+            .addStringOption(option => option.setName('url').setRequired(false).setDescription('The URL containing pack data.'))
             .setDescription('Redownload a pack from this guild.'))
         .setDescription('Manage the packs of this guild.'),
     new SlashCommandBuilder()
@@ -43,6 +44,6 @@ const commands = [
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN as string);
 
-rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID as string, process.env.GUILD_ID as string), { body: commands })
+rest.put(Routes.applicationCommands(process.env.CLIENT_ID as string), { body: commands })
     .then(() => console.log('Successfully registered application commands.'))
     .catch(console.error);

@@ -1,26 +1,25 @@
-import { ActionRowData, APIEmbedField, ButtonStyle, ComponentType, MessageActionRowComponentData, User } from 'discord.js';
-import { bolden, countBlanks, fillBlanks } from '../../util/card';
+import { APIActionRowComponent, APIEmbedField, APIMessageActionRowComponent, ButtonStyle, ComponentType, User } from 'discord.js';
+import { bolden, fillBlanks } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
-import { FullContext, Logic } from '../logic';
-import { getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
+import { Game, Logic } from '../logic';
+import { countBlanks, getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
 
-async function message({ ctx, players, guildid }: FullContext<RoundContext>, player: User | null): Promise<MessageOptions> {
-    const prompt = await getBlackCard(guildid, ctx.prompt);
-    const blanks = countBlanks(prompt);
+function message(game: Game, players: User[], ctx: RoundContext, player: User | null): MessageOptions {
+    const prompt = getBlackCard(game, ctx.prompt);
+    const blanks = countBlanks(game, ctx.prompt);
 
-    const answers = (await Promise.all(ctx.shuffle.map(async (p, i) => {
+    const answers = ctx.shuffle.map((p, i) => {
         let answers: string[];
         if (ctx.quiplash) {
             answers = ctx.playing[p] as string[];
         } else if (ctx.playing[p] === 'double') {
-            answers = await Promise.all(ctx.doubleornothing![p].cards.map(c => getWhiteCard(guildid, c)));
+            answers = ctx.doubleornothing![p].cards.map(c => getWhiteCard(game, c));
             const missing = blanks - answers.length;
             for (let i = 0; i < missing; i++) {
                 answers.push(answers[i]);
             }
         } else {
-            answers = await Promise.all((ctx.playing[p] as (number | string)[])
-                .map(i => getWhiteCard(guildid, ctx.hand[p][i!])));
+            answers = (ctx.playing[p] as (number | string)[]).map(i => getWhiteCard(game, ctx.hand[p][i!]));
         }
 
         let answer = prompt;
@@ -31,16 +30,16 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
         }
 
         return `\`${i + 1}.\` ${answer}`;
-    }))).join('\n');
+    }).join('\n');
 
-    const message = `Card Czar: ${players[ctx.czar]}\n\n> ${await getBlackCard(guildid, ctx.prompt)}\n\n${answers}`;
+    const message = `Card Czar: ${players[ctx.czar]}\n\n> ${getBlackCard(game, ctx.prompt)}\n\n${answers}`;
     
-    const components: ActionRowData<MessageActionRowComponentData>[] = [];
+    const components: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
     if (players[ctx.czar] === player) {
         components.push(...createButtonGrid(ctx.shuffle.length, i => ({
             style: ButtonStyle.Primary,
             label: (i + 1).toString(),
-            customId: `answer_${i}`,
+            custom_id: `answer_${i}`,
         })));
     }
     if (player) {
@@ -48,7 +47,7 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
             type: ComponentType.ActionRow,
             components: [{
                 type: ComponentType.Button,
-                customId: '_leave',
+                custom_id: '_leave',
                 style: ButtonStyle.Danger,
                 label: 'Leave',
             }]
@@ -61,42 +60,41 @@ async function message({ ctx, players, guildid }: FullContext<RoundContext>, pla
             value: message,
         }]}],
         components,
-        forceList: true,
     };
 }
 
-export const readLogic: Logic<void, RoundContext> = {
-    async onEvent(full, event, resolve) {
-        const { ctx, game, players, guildid } = full;
+export const readLogic: Logic<true, RoundContext> = function* (game, players, ctx) {
+
+    game.updateMessage(players, p => message(game, players, ctx, p));
+
+    while (true) {
+        const event = yield;
+
         switch (event.type) {
-        case 'update':
-            game.updateMessage(players, p => message(full, p));
-        break;
         case 'add':
         case 'remove':
             if (players.length > 2) {
-                game.updateMessage(players, p => message(full, p), event.interaction);
+                game.updateMessage(players, p => message(game, players, ctx, p), event.interaction);
             }
         break;
         case 'interaction':
             const i = event.interaction;
             if (i.customId.startsWith('answer_')) {
-                const prompt = await getBlackCard(guildid, ctx.prompt);
-                const blanks = countBlanks(prompt);
+                const prompt = getBlackCard(game, ctx.prompt);
+                const blanks = countBlanks(game, ctx.prompt);
                 const winner = ctx.shuffle[parseInt(i.customId.substring(7))];
             
                 let answers: string[];
                 if (ctx.quiplash) {
                     answers = ctx.playing[winner] as string[];
                 } else if (ctx.playing[winner] === 'double') {
-                    answers = await Promise.all(ctx.doubleornothing![winner].cards.map(c => getWhiteCard(guildid, c)));
+                    answers = ctx.doubleornothing![winner].cards.map(c => getWhiteCard(game, c));
                     const missing = blanks - answers.length;
                     for (let i = 0; i < missing; i++) {
                         answers.push(answers[i]);
                     }
                 } else {
-                    answers = await Promise.all((ctx.playing[winner] as (number | null)[])
-                        .map(i => getWhiteCard(guildid, ctx.hand[winner][i!])));
+                    answers = (ctx.playing[winner] as (number | null)[]).map(i => getWhiteCard(game, ctx.hand[winner][i!]));
                 }
 
                 const answer = `> ${fillBlanks(prompt, answers)}`;
@@ -134,9 +132,9 @@ export const readLogic: Logic<void, RoundContext> = {
                 if (!ctx.quiplash) {
                     ctx.lastWinner = winner;
                 }
+                game.closeMessage(players, undefined, i);
                 game.send(players, { embeds: [{ fields }]});
-                await game.closeMessage(players, undefined, i);
-                resolve();
+                return true;
             }
         break;
         }

@@ -6,28 +6,44 @@ config();
 import { ChannelType, Client, GatewayIntentBits } from 'discord.js';
 import { GameImpl, games, gametypes } from "./game/game";
 import { createSave, db, loadGames, refreshPack, saveGames } from "./db";
+import { existsSync } from "fs";
 
 // Create a new client instance
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages] });
 
 // When the client is ready, run this code (only once)
 client.once('ready', async () => {
-    const id = process.env.GUILD_ID!;
-    const s = createSave(id);
-    db[id] = s;
-    games[id] = [];
-    await loadGames(s);
+    const guilds = await client.guilds.fetch();
 
-    for (const save of s.games) {
-        const game = gametypes[save.game];
-        const instance = new GameImpl(game, id);
-        instance.load(client, save).then(() => {
-            games[id].push(instance);
-            console.log(`Loaded ${save.game} game`);
-        });
-    }
+    guilds.each(async guild => {
+        const id = guild.id;
+        const s = createSave(id);
+        
+        console.log(`bot exists inside ${guild.name}`);
+        if (!existsSync(s.path)) return;
+
+        db[id] = s;
+        games[id] = [];
+        await loadGames(s);
+
+        for (const save of s.games) {
+            const game = gametypes[save.game];
+            const instance = new GameImpl(game, id);
+            instance.load(client, save).then(() => {
+                games[id].push(instance);
+                console.log(`Loaded ${save.game} game`);
+            }).catch(error => {
+                const now = new Date().toLocaleString();
+                console.error(`--- ERROR ---`);
+                console.error(error);
+                console.error(`encountered while loading a game of "${game.name}" inside guild ${id} at ${now}`);
+                console.error(`save: ${JSON.stringify(save)}`)
+                console.error(`-------------`);
+            });
+        }
+    });
+    
     console.log('Ready!');
-    console.log(db[id]);
 });
 
 client.on('error', e => {
@@ -81,7 +97,11 @@ client.on('interactionCreate', interaction => {
 
     switch (interaction.commandName) {
         case "ping":
-            interaction.reply('hurb');
+            if (Math.random() < 0.1) {
+                interaction.reply('pong');
+            } else {
+                interaction.reply('hurb');
+            }
             return;
         case "pack":
             switch (interaction.options.getSubcommand()) {

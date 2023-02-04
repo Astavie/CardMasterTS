@@ -1,7 +1,5 @@
-import { Awaitable } from '@discordjs/builders';
-import { ActionRowData, APIEmbed, ButtonInteraction, ButtonStyle, ComponentEmojiResolvable, ComponentType, MessageActionRowComponentData, StringSelectMenuInteraction } from 'discord.js'
-import { MessageOptions } from '../util/message'
-import { Event, FullContext, Logic, Resolve } from './logic'
+import { APIActionRowComponent, APIEmbed, APIMessageActionRowComponent, APIMessageComponentEmoji, ButtonInteraction, ButtonStyle, ComponentType, Snowflake, StringSelectMenuInteraction, User } from 'discord.js'
+import { Transformer, Game, Logic } from './logic'
 
 export type Arg = Flags | MultiChoice | Number;
 
@@ -9,16 +7,14 @@ export type Flags = {
     type: 'flags',
     name: string,
 
-    values:  readonly string[],
-    default: readonly boolean[],
+    values:  readonly string[] | ((guild: Snowflake) => string[]),
 }
 
 export type MultiChoice = {
     type: 'choice',
     name: string,
-    
-    values:  readonly ChoiceOption[],
-    default: readonly number[],
+
+    values:  readonly ChoiceOption[] | ((guild: Snowflake) => ChoiceOption[]),
     min: number,
     max: number,
 }
@@ -26,7 +22,7 @@ export type MultiChoice = {
 export type ChoiceOption = {
     label: string;
     description?: string;
-    emoji?: ComponentEmojiResolvable;
+    emoji?: APIMessageComponentEmoji;
 }
 
 export type Number = {
@@ -44,16 +40,11 @@ export type SetupContext<T extends readonly Arg[]> = { [A in T[number] as A['nam
     A extends Number      ?  number   : never
 };
 
-type Override<T extends readonly Arg[]> = { [A in T[number] as A['name']]?:
-    A extends Flags       ? (full: FullContext<SetupContext<T>>) => string[] :
-    A extends MultiChoice ? (full: FullContext<SetupContext<T>>) => ChoiceOption[] : never
-};
+export type SetupMessageGenerator<A extends readonly Arg[]> = Transformer<void, APIEmbed, SetupContext<A>>;
 
-export type SetupMessageGenerator<A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>) => APIEmbed;
+export type GameStarter<C, A extends readonly Arg[]> = Transformer<ButtonInteraction, C | null, SetupContext<A>>
 
-export type GameStarter<T, A extends readonly Arg[]> = (full: FullContext<SetupContext<A>>, i: ButtonInteraction) => Awaitable<T | null>
-
-function defaultMessageGenerator({ players }: FullContext<unknown>): APIEmbed {
+function defaultMessageGenerator(_: Game, players: User[]): APIEmbed {
     return {
         fields: [{
             name: 'Players',
@@ -62,31 +53,21 @@ function defaultMessageGenerator({ players }: FullContext<unknown>): APIEmbed {
     };
 }
 
-export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, Partial<SetupContext<A>>> {
+export function setup<C extends NonNullable<unknown>, A extends readonly Arg[]>(
+    args: A,
+    starter: GameStarter<C, A>,
+    message: SetupMessageGenerator<A> = defaultMessageGenerator,
+): Logic<C | null, SetupContext<A>> {
+    function fullMessage(game: Game, players: User[], ctx: SetupContext<A>) {
+        const embeds = [message(game, players, ctx)];
+        const components: APIActionRowComponent<APIMessageActionRowComponent>[] = [];
 
-    args: A;
-    override: Override<A>;
-    generator: SetupMessageGenerator<A>;
-    starter: GameStarter<T, A>;
-
-    constructor(args: A, override: Override<A>, starter: GameStarter<T, A>, generator: SetupMessageGenerator<A> = defaultMessageGenerator) {
-        this.args = args;
-        this.override = override;
-        this.generator = generator;
-        this.starter = starter;
-    }
-
-    message(full: FullContext<SetupContext<A>>): MessageOptions {
-        const embeds = [this.generator(full)];
-        const components: ActionRowData<MessageActionRowComponentData>[] = [];
-        const ctx = full.ctx;
-
-        for (const arg of this.args) {
-            const row: ActionRowData<MessageActionRowComponentData> = {
+        for (const arg of args) {
+            const row: APIActionRowComponent<APIMessageActionRowComponent> = {
                 type: ComponentType.ActionRow,
                 components: [{
                     type: ComponentType.Button,
-                    customId: `_${arg.name}_`,
+                    custom_id: `_${arg.name}_`,
                     label: arg.name,
                     style: ButtonStyle.Primary,
                     disabled: true,
@@ -96,27 +77,27 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
 
             switch (arg.type) {
             case 'flags':
-                let values: readonly string[] = arg.values;
-                if (arg.name in this.override) {
-                    values = this.override[arg.name](full);
+                let values = arg.values;
+                if (typeof values === 'function') {
+                    values = values(game.getGuild());
                 }
                 values.forEach((value, i) => row.components.push({
                     type: ComponentType.Button,
-                    customId: `_${arg.name}_${i}`,
+                    custom_id: `_${arg.name}_${i}`,
                     label: value,
                     style: (ctx[arg.name] as boolean[])[i] ? ButtonStyle.Success : ButtonStyle.Secondary,
                 }));
                 break;
             case 'choice':
-                let values2: readonly ChoiceOption[] = arg.values;
-                if (arg.name in this.override) {
-                    values2 = this.override[arg.name](full);
+                let values2 = arg.values;
+                if (typeof values2 === 'function') {
+                    values2 = values2(game.getGuild());
                 }
                 row.components = [{
                     type: ComponentType.StringSelect,
-                    customId: `_${arg.name}_`,
-                    minValues: arg.min,
-                    maxValues: Math.min(values2.length, arg.max),
+                    custom_id: `_${arg.name}_`,
+                    min_values: arg.min,
+                    max_values: Math.min(values2.length, arg.max),
                     placeholder: arg.name,
                     options: values2.map((value, i) => ({
                         default: (ctx[arg.name] as number[]).includes(i),
@@ -130,18 +111,18 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
                     type: ComponentType.Button,
                     style: ButtonStyle.Primary,
                     label: '◀',
-                    customId: `_${arg.name}_dec`,
+                    custom_id: `_${arg.name}_dec`,
                     disabled: (ctx[arg.name] as number) <= arg.min,
                 },{
                     type: ComponentType.Button,
                     style: ButtonStyle.Secondary,
                     label: (ctx[arg.name] as number).toString(),
-                    customId: `_${arg.name}_def`,
+                    custom_id: `_${arg.name}_def`,
                 },{
                     type: ComponentType.Button,
                     style: ButtonStyle.Primary,
                     label: '▶',
-                    customId: `_${arg.name}_inc`,
+                    custom_id: `_${arg.name}_inc`,
                     disabled: (ctx[arg.name] as number) >= arg.max,
                 })
                 break;
@@ -152,22 +133,22 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
             type: ComponentType.ActionRow,
             components: [{
                 type: ComponentType.Button,
-                customId: '_join',
+                custom_id: '_join',
                 label: 'Join',
                 style: ButtonStyle.Success,
             },{
                 type: ComponentType.Button,
-                customId: '_leave',
+                custom_id: '_leave',
                 label: 'Leave',
                 style: ButtonStyle.Danger,
             },{
                 type: ComponentType.Button,
-                customId: '_start',
+                custom_id: '_start',
                 label: 'Start',
                 style: ButtonStyle.Primary,
             },{
                 type: ComponentType.Button,
-                customId: '_close',
+                custom_id: '_close',
                 label: 'Close',
                 style: ButtonStyle.Secondary,
             }],
@@ -179,81 +160,72 @@ export class SetupLogic<T, A extends readonly Arg[]> implements Logic<T | null, 
             forceList: false,
         };
     }
-
-    onEvent(_full: FullContext<Partial<SetupContext<A>>>, event: Event, resolve: Resolve<T | null>): void {
-        const full = _full as unknown as FullContext<SetupContext<A>>;
-        const { ctx, game } = full;
-
-        switch (event.type) {
-        case 'start':
-            for (const arg of this.args) {
-                if (!ctx[arg.name]) ctx[arg.name] = arg.default;
-            }
-            game.updateLobby(this.message(full), event.interaction);
-            break;
-        case 'interaction':
-            switch (event.interaction.customId) {
-            case '_close':
-                game.closeLobby(undefined, event.interaction);
-                resolve(null);
-                return;
-            case '_join':
-                if (game.addPlayer(event.interaction.user)) {
-                    game.updateLobby(this.message(full), event.interaction);
-                } else {
-                    event.interaction.reply({
-                        content: 'You have already joined!',
-                        ephemeral: true
-                    });
-                }
-                return;
-            case '_leave':
-                if (game.removePlayer(event.interaction.user)) {
-                    game.updateLobby(this.message(full), event.interaction);
-                } else {
-                    event.interaction.reply({ content: 'You have not even joined!', ephemeral: true });
-                }
-                return;
-            case '_start':
-                (async () => {
-                    const t = await this.starter(full, event.interaction as ButtonInteraction);
-                    if (t !== null) resolve(t);
-                })();
-                return;
-            }
-
-            const arg = this.args.find(arg => event.interaction.customId.startsWith(`_${arg.name}_`));
-            if (!arg) return;
-
-            switch (arg.type) {
-            case 'flags':
-                const num = parseInt(event.interaction.customId.substring(arg.name.length + 2));
-                const flags = ctx[arg.name] as boolean[];
-                flags[num] = !flags[num];
+    return function* (game, players, ctx) {
+        while (true) {
+            const event = yield;
+            switch (event.type) {
+            case 'start':
+                game.updateLobby(fullMessage(game, players, ctx), event.interaction);
                 break;
-            case 'number':
-                const end = event.interaction.customId.substring(event.interaction.customId.length - 3);
-                switch (end) {
-                case 'inc':
-                    if (ctx[arg.name] < arg.max) (ctx[arg.name] as number) += 1;
+            case 'interaction':
+                switch (event.interaction.customId) {
+                case '_close':
+                    game.closeLobby(undefined, event.interaction);
+                    return null;
+                case '_join':
+                    if (game.addPlayer(event.interaction.user)) {
+                        game.updateLobby(fullMessage(game, players, ctx), event.interaction);
+                    } else {
+                        event.interaction.reply({
+                            content: 'You have already joined!',
+                            ephemeral: true
+                        });
+                    }
                     break;
-                case 'dec':
-                    if (ctx[arg.name] > arg.min) (ctx[arg.name] as number) -= 1;
+                case '_leave':
+                    if (game.removePlayer(event.interaction.user)) {
+                        game.updateLobby(fullMessage(game, players, ctx), event.interaction);
+                    } else {
+                        event.interaction.reply({ content: 'You have not even joined!', ephemeral: true });
+                    }
                     break;
-                case 'def':
-                    (ctx[arg.name] as number) = arg.default;
+                case '_start':
+                    const t = starter(game, players, ctx, event.interaction as ButtonInteraction);
+                    if (t !== null) return t;
                     break;
                 }
-                break;
-            case 'choice':
-                (ctx[arg.name] as number[]) = (event.interaction as StringSelectMenuInteraction).values.map(value => parseInt(value));
-                break;
-            }
+
+                const arg = args.find(arg => event.interaction.customId.startsWith(`_${arg.name}_`));
+                if (!arg) break;
+
+                switch (arg.type) {
+                case 'flags':
+                    const num = parseInt(event.interaction.customId.substring(arg.name.length + 2));
+                    const flags = ctx[arg.name] as boolean[];
+                    flags[num] = !flags[num];
+                    break;
+                case 'number':
+                    const end = event.interaction.customId.substring(event.interaction.customId.length - 3);
+                    switch (end) {
+                    case 'inc':
+                        if (ctx[arg.name] < arg.max) (ctx[arg.name] as number) += 1;
+                        break;
+                    case 'dec':
+                        if (ctx[arg.name] > arg.min) (ctx[arg.name] as number) -= 1;
+                        break;
+                    case 'def':
+                        (ctx[arg.name] as number) = arg.default;
+                        break;
+                    }
+                    break;
+                case 'choice':
+                    (ctx[arg.name] as number[]) = (event.interaction as StringSelectMenuInteraction).values.map(value => parseInt(value));
+                    break;
+                }
             
-            game.updateLobby(this.message(full), event.interaction);
-            break;
+                game.updateLobby(fullMessage(game, players, ctx), event.interaction);
+                break;
+            }
         }
-    }
-
+    };
 }
-

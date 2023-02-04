@@ -25,6 +25,10 @@ export function createSave(guild: Snowflake): Save {
 }
 
 export function saveGames(save: Save) {
+    if (save.games.length === 0 && Object.keys(save.packs).length === 0) {
+        rmSync(save.path, { recursive: true, force: true });
+        return;
+    }
     if (!existsSync(save.path)) {
         mkdirSync(save.path, { recursive: true });
     }
