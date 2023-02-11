@@ -1,35 +1,12 @@
 import { APIActionRowComponent, APIEmbedField, APIMessageActionRowComponent, ButtonStyle, ComponentType, User } from 'discord.js';
-import { bolden, fillBlanks } from '../../util/card';
 import { createButtonGrid, MessageOptions } from '../../util/message';
 import { Game, Logic } from '../logic';
-import { countBlanks, getBlackCard, getPointsList, getWhiteCard, randoId, RoundContext } from './cah';
+import { getBlackCard, getPointsList, randoId, RoundContext } from './cah';
 
 function message(game: Game, players: User[], ctx: RoundContext, player: User | null): MessageOptions {
-    const prompt = getBlackCard(game, ctx.prompt);
-    const blanks = countBlanks(game, ctx.prompt);
 
     const answers = ctx.shuffle.map((p, i) => {
-        let answers: string[];
-        if (ctx.quiplash) {
-            answers = ctx.playing[p] as string[];
-        } else if (ctx.playing[p] === 'double') {
-            answers = ctx.doubleornothing![p].cards.map(c => getWhiteCard(game, c));
-            const missing = blanks - answers.length;
-            for (let i = 0; i < missing; i++) {
-                answers.push(answers[i]);
-            }
-        } else {
-            answers = (ctx.playing[p] as (number | string)[]).map(i => getWhiteCard(game, ctx.hand[p][i!]));
-        }
-
-        let answer = prompt;
-        if (answer.indexOf("_") === -1) {
-            answer = bolden(answers.join(' '));
-        } else {
-            answer = fillBlanks(answer, answers);
-        }
-
-        return `\`${i + 1}.\` ${answer}`;
+        return `\`${i + 1}.\` ${ctx.result[p]}`;
     }).join('\n');
 
     const message = `Card Czar: ${players[ctx.czar]}\n\n> ${getBlackCard(game, ctx.prompt)}\n\n${answers}`;
@@ -80,24 +57,8 @@ export const readLogic: Logic<true, RoundContext> = function* (game, players, ct
         case 'interaction':
             const i = event.interaction;
             if (i.customId.startsWith('answer_')) {
-                const prompt = getBlackCard(game, ctx.prompt);
-                const blanks = countBlanks(game, ctx.prompt);
                 const winner = ctx.shuffle[parseInt(i.customId.substring(7))];
-            
-                let answers: string[];
-                if (ctx.quiplash) {
-                    answers = ctx.playing[winner] as string[];
-                } else if (ctx.playing[winner] === 'double') {
-                    answers = ctx.doubleornothing![winner].cards.map(c => getWhiteCard(game, c));
-                    const missing = blanks - answers.length;
-                    for (let i = 0; i < missing; i++) {
-                        answers.push(answers[i]);
-                    }
-                } else {
-                    answers = (ctx.playing[winner] as (number | null)[]).map(i => getWhiteCard(game, ctx.hand[winner][i!]));
-                }
-
-                const answer = `> ${fillBlanks(prompt, answers)}`;
+                const answer = `> ${ctx.result[winner]}`;
 
                 function serializePlayer(id: string) {
                     return id === randoId ? '`Rando Cardrissian`' : `<@${id}>`;

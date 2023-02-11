@@ -77,6 +77,7 @@ export type BaseRoundContext = {
     czar: number,
 
     points: {[key: string]: number},
+    result: {[key: string]: string},
     blackDeck: UnrealizedCard[],
     whiteDeck: UnrealizedCard[],
     maxPoints: number,
@@ -87,8 +88,8 @@ export type CardRoundContext = BaseRoundContext & {
     quiplash: false,
     handCards: number,
     hand: {[key: string]: Card[] },
-    playing: {[key: string]: (number | null)[] | 'double' },
-    
+    playing: {[key: string]: number[] | 'double' },
+
     lastWinner?: string,
     doubleornothing?: {[key:string]: {
         cards: Card[],

@@ -28,30 +28,64 @@ export function realizeCard(card: string, realizations: string[]) {
     );
 }
 
-export function fillBlanks(card: string, blanks: (string | null)[]) {
-    const n = card.match(/\\_/gi)?.length;
+export function fillBlanks(card: string, holes: number, blanks: string[], loop = false): string {
+    const startn = card.match(/\\_/gi)?.length ?? 0;
+    let extra = holes - startn;
+    if (extra < 0) extra = 0;
 
-    if (!n) {
-        return `${card}\n> ${bolden(blanks.map(s => s ?? '\\_').join(' '))}`;
-    }
+    while (true) {
+        let copy = [...blanks];
+        while (copy.length) {
+            let first = copy.shift()!.replaceAll('\\_', '**\\_**');
+            if (!card.includes('\\_')) {
+                extra -= 1;
 
-    const copy = [...blanks];
-    if (copy.length > n) {
-        copy.push(copy.splice(n - 1, copy.length).join(' '));
-    }
+                // append extra cards here if this is the last blank
+                const lastBlank = extra === 0;
+                if (lastBlank) {
+                    let recursive = first.includes('\\_');
+                    while (!recursive && copy.length) {
+                        first = `${first} ${copy.shift()!.replaceAll('\\_', '**\\_**')}`
+                        recursive = first.includes('\\_');
+                    }
+                }
 
-    return card.replaceAll("\\_", () => {
-        let card = copy.shift();
-        if (card === null || card === undefined) return "\\_";
+                card = `${card}\n> ${bolden(first)}`;
+            } else {
+                // rules to make the blank fit the sentence
+                // final punctuation gets removed
+                if (first.endsWith('.')) {
+                    first = first.substring(0, first.length - 1);
+                }
 
-        // rules to make the blank fit the sentence
-        // final punctuation gets removed
-        if (card.endsWith('.')) {
-            card = card.substring(0, card.length - 1);
+                // append extra cards here if this is the last blank
+                const lastBlank = extra === 0 && !card.replace('\\_', '').includes('\\_');
+                if (lastBlank) {
+                    let recursive = first.includes('\\_');
+                    while (!recursive && copy.length) {
+                        first = `${first} ${copy.shift()!.replaceAll('\\_', '**\\_**')}`
+                        recursive = first.includes('\\_');
+                    }
+                }
+
+                card = card.replace('\\_', bolden(first));
+            }
         }
 
-        return bolden(card);
-    });
+        // loop until every blank is filled if that is specified
+        if (extra === 0 || !loop) {
+            break;
+        }
+    }
+
+    card = card.replaceAll('****', '');
+
+    // append extra unused blanks
+    for (let i = 0; i < extra; i++) {
+        card = `${card}\n> \\_`;
+    }
+
+    return card;
 }
 
 export function bolden(s: string) {

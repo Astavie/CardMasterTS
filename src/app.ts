@@ -37,7 +37,7 @@ client.once('ready', async () => {
                 console.error(`--- ERROR ---`);
                 console.error(error);
                 console.error(`encountered while loading a game of "${game.name}" inside guild ${id} at ${now}`);
-                console.error(`save: ${JSON.stringify(save)}`)
+                console.error(`save: %O`, save)
                 console.error(`-------------`);
             });
         }
@@ -104,29 +104,49 @@ client.on('interactionCreate', interaction => {
             }
             return;
         case "pack":
+            db[interaction.guildId!] ??= createSave(interaction.guildId!);
+            const packs = db[interaction.guildId!].packs;
+
             switch (interaction.options.getSubcommand()) {
                 case "list":
-                    // TODO
-                    interaction.reply({ content: Object.keys(db[interaction.guildId!].packs).join() });
+                    interaction.reply({ content: Object.keys(packs).map(k => `\`${k}\` <${packs[k]}>`).join('\n') });
                     break;
                 case "add":
-                    const name = interaction.options.getString('pack')!;
-                    const url = interaction.options.getString('url')!;
-                    // TODO: Validate pack
-                    db[interaction.guildId!].packs[name] = url;
+                    const name = interaction.options.getString('pack', true).replace(/[^\w ]/g, '');
+                    if (name in packs) {
+                        interaction.reply({ content: `Pack with name \`${name}\` already exists!`, ephemeral: true });
+                        break;
+                    }
+
+                    const url = interaction.options.getString('url', true);
+                    packs[name] = url;
                     saveGames(db[interaction.guildId!]);
                     interaction.reply({ content: `Pack \`${name}\` located at ${url} added!` });
                     break;
                 case "remove":
-                    const name2 = interaction.options.getString('pack')!;
-                    // TODO: Validate name
-                    delete db[interaction.guildId!].packs[name2];
+                    const name2 = interaction.options.getString('pack', true);
+                    if (!(name2 in packs)) {
+                        interaction.reply({ content: `Pack with name \`${name2}\` does not exist!`, ephemeral: true });
+                        break;
+                    }
+
+                    delete packs[name2];
+                    refreshPack(interaction.guildId!, name2);
                     saveGames(db[interaction.guildId!]);
                     interaction.reply({ content: `Pack \`${name2}\` removed!` });
                     break;
                 case "refresh":
-                    const name3 = interaction.options.getString('pack')!;
-                    // TODO: Validate name
+                    const name3 = interaction.options.getString('pack', true);
+                    if (!(name3 in packs)) {
+                        interaction.reply({ content: `Pack with name \`${name3}\` does not exist!`, ephemeral: true });
+                        break;
+                    }
+
+                    const url2 = interaction.options.getString('url', false);
+                    if (url2) {
+                        packs[name3] = url2;
+                        saveGames(db[interaction.guildId!]);
+                    }
                     refreshPack(interaction.guildId!, name3);
                     interaction.reply({ content: `Pack \`${name3}\` refreshed!` });
                     break;

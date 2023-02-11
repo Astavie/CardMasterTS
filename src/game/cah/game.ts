@@ -1,3 +1,4 @@
+import { fillBlanks } from '../../util/card';
 import { Logic, Transformer } from '../logic';
 import { Card, CardRoundContext, countBlanks, GameContext, getBlackCard, getWhiteCard, randoId, realizeBlackCard, realizeWhiteCard } from './cah';
 
@@ -56,6 +57,8 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = (game, p
 
     // Give white cards
     ctx.ctx.playing = {};
+    ctx.ctx.result = {};
+    const fullPrompt = fillBlanks(getBlackCard(game, ctx.ctx.prompt), countBlanks(game, ctx.ctx.prompt), []);
 
     if (!ctx.ctx.quiplash) {
         for (const player of players) {
@@ -74,11 +77,17 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = (game, p
             }
 
             ctx.ctx.hand[player.id] = hand;
-            if (player !== players[ctx.ctx.czar]) ctx.ctx.playing[player.id] = Array(blanks).fill(null);
+            if (player !== players[ctx.ctx.czar]) {
+                ctx.ctx.playing[player.id] = [];
+                ctx.ctx.result[player.id] = fullPrompt;
+            }
         }
     } else {
         for (const player of players) {
-            if (player !== players[ctx.ctx.czar]) ctx.ctx.playing[player.id] = null;
+            if (player !== players[ctx.ctx.czar]) {
+                ctx.ctx.playing[player.id] = null;
+                ctx.ctx.result[player.id] = fullPrompt;
+            }
         }
     }
 
@@ -94,24 +103,28 @@ export const prepareRound: Transformer<boolean, boolean, GameContext> = (game, p
             }
         }
 
-        const hand: Card[] = [];
-        while (hand.length < blanks) {
+        let randoPlaying: Card[] = [];
+        let randoResult: string = fillBlanks(getBlackCard(game, ctx.ctx.prompt), blanks, []);
+        while (randoResult.includes('\\_')) {
             const card = ctx.ctx.whiteDeck.pop();
             if (!card) {
                 game.send(players, { embeds: [{
                     description: '**The game has ended because the white deck ran out of cards.**'
                 }]})
                 return false;
-            } else {
-                hand.push(realizeWhiteCard(game, card, players));
             }
+
+            randoPlaying.push(realizeWhiteCard(game, card, players));
+            randoResult = fillBlanks(getBlackCard(game, ctx.ctx.prompt), blanks, randoPlaying.map(c => getWhiteCard(game, c)));
         }
 
         if (ctx.ctx.quiplash) {
-            ctx.ctx.playing[randoId] = hand.map(c => getWhiteCard(game, c));
+            ctx.ctx.playing[randoId] = randoPlaying.map(c => getWhiteCard(game, c));
+            ctx.ctx.result[randoId] = randoResult;
         } else {
-            ctx.ctx.hand[randoId] = hand;
+            ctx.ctx.hand[randoId] = randoPlaying;
             ctx.ctx.playing[randoId] = [...Array(blanks).keys()];
+            ctx.ctx.result[randoId] = randoResult;
         }
     }
 
@@ -154,9 +167,9 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = function* (game, play
                     hand.push(realizeWhiteCard(game, card, players));
                 }
 
-                const blanks = countBlanks(game, ctx.ctx.prompt);
                 ctx.ctx.hand[i.user.id] = hand;
-                ctx.ctx.playing[i.user.id] = Array(blanks).fill(null);
+                ctx.ctx.playing[i.user.id] = [];
+                ctx.ctx.result[i.user.id] = getBlackCard(game, ctx.ctx.prompt);
             }
 
             game.addPlayer(i.user);
@@ -186,6 +199,7 @@ export const joinLeaveLogic: Logic<boolean, GameContext> = function* (game, play
             game.removePlayer(i.user);
             delete ctx.ctx.points[i.user.id];
             delete ctx.ctx.playing[i.user.id];
+            delete ctx.ctx.result[i.user.id];
             if (!ctx.ctx.quiplash) delete ctx.ctx.hand[i.user.id];
             const sindex = ctx.ctx.shuffle.indexOf(i.user.id);
             if (sindex !== -1) ctx.ctx.shuffle.splice(sindex, 1);
