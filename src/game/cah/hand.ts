@@ -132,7 +132,7 @@ export const handLogic: Logic<void, RoundContext> = function* (game, players, ct
                         game.updateMessage(players, p => message(game, players, ctx, p), i);
                     } else {
                         ctx.playing[i.user.id] = 'double';
-                        ctx.result[i.user.id] = getResult(game, ctx, ctx.doubleornothing![i.user.id].cards.map(c => getWhiteCard(game, c)));
+                        ctx.result[i.user.id] = getResult(game, ctx, ctx.doubleornothing![i.user.id].cards.map(c => getWhiteCard(game, c)), true);
                         if (resolveWhenPlayersDone(game, players, ctx, i)) return;
                     }
                 } else if (i.customId.startsWith('hand_')) {
