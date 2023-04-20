@@ -12,6 +12,7 @@
     "test": "rm -r build/* ; tsc && node ./build/app.js",
     "nuke": "node ./build/nukecommands.js",
     "deploy": "node ./build/deploycommands.js",
+    "stealdata": "rm -r build/* ; tsc && node ./build/cache.js",
     "build": "rm -r build/* ; tsc",
     "start": "node ./build/app.js"
   },

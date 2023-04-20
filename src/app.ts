@@ -158,7 +158,7 @@ client.on('interactionCreate', interaction => {
                 return;
             }
 
-            for (const game of games[interaction.guildId!]) {
+            for (const game of games[interaction.guildId!] ?? []) {
                 if (game.lobby === interaction.channel) {
                     interaction.reply({ ephemeral: true, content: "There is already an active game in this channel!" });
                     return;
