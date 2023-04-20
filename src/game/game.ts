@@ -4,6 +4,7 @@ import { escapeDiscord } from "../util/card";
 import { disableButtons, MessageController, MessageOptions, MessageSave } from "../util/message";
 import { Serializable } from "../util/saving";
 import { CAH } from "./cah/cah";
+import { JJ } from "./jj/jj";
 import { Event, Game, GameType, MessageGenerator, Pack, UserInteraction } from "./logic";
 
 // Games
@@ -15,6 +16,7 @@ function addGame(game: GameType<unknown>): void {
 }
 
 addGame(CAH);
+addGame(JJ);
 
 // Impl
 export type GameSave<C> = {
@@ -349,6 +351,12 @@ export class GameImpl<C> implements Game, Serializable<GameSave<C>> {
                 embeds: m.embeds,
                 components: m.components && disableButtons(m.components),
             };
+            if (options.embeds) {
+                for (const embed of options.embeds) {
+                    embed.title ??= this.type.name;
+                    embed.color ??= this.type.color;
+                }
+            }
             return options;
         }
 

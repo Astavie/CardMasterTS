@@ -35,16 +35,18 @@ export function disableButtons(m: APIActionRowComponent<APIMessageActionRowCompo
 
         for (const c of row.components) {
             if (!c.disabled && (!exceptions || ('custom_id' in c && !exceptions.includes(c.custom_id)))) {
-                newRow.push({ ...c, disabled: true });
+                // newRow.push({ ...c, disabled: true });
             } else {
                 newRow.push(c);
             }
         }
 
-        newRows.push({
-            type: ComponentType.ActionRow,
-            components: newRow,
-        });
+        if (newRow.length > 0) {
+            newRows.push({
+                type: ComponentType.ActionRow,
+                components: newRow,
+            });
+        }
     }
     return newRows;
 }
